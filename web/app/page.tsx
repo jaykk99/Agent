@@ -44,12 +44,12 @@ interface GitHubRepo { id: number; name: string; full_name: string; description:
 
 const DEFAULT_SETTINGS: AppSettings = {
   is_custom_gemini_key_enabled: false, custom_gemini_api_key: '',
-  active_model_name: 'gemini-1.5-flash', is_custom_model_enabled: false,
+  active_model_name: 'gemini-2.0-flash', is_custom_model_enabled: false,
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
 };
 
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro'];
 
 type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
 
@@ -520,8 +520,8 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
           )}
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-200">Use custom Gemini API key</p>
-              <p className="text-xs text-gray-500">Override the server-side key with your own</p>
+              <p className="text-sm text-gray-200">Use a different Gemini API key</p>
+              <p className="text-xs text-gray-500">Only needed if you want to override the active server key</p>
             </div>
             <button onClick={() => setLocal(s => ({ ...s, is_custom_gemini_key_enabled: !s.is_custom_gemini_key_enabled }))}
               className={`w-10 h-6 rounded-full transition-colors ${local.is_custom_gemini_key_enabled ? 'bg-indigo-600' : 'bg-gray-600'}`}>
