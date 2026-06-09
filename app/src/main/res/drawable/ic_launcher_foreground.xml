@@ -1,0 +1,52 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Central Connection Node Hub for API AI Agent -->
+    <group android:translateX="0" android:translateY="0">
+        <!-- Lines connecting outer nodes -->
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="3.5"
+            android:strokeLineCap="round"
+            android:pathData="M54,54 L28,28 M54,54 L80,28 M54,54 L54,84 M54,54 L26,70 M54,54 L82,70" />
+            
+        <!-- Central core circle -->
+        <path
+            android:fillColor="#D0BCFF"
+            android:pathData="M54,54m-12,0a12,12 0 1,1 24,0a12,12 0 1,1 -24,0" />
+            
+        <!-- Center glowing point -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,54m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
+
+        <!-- Node 1 (Top Left) -->
+        <path
+            android:fillColor="#CCC2DC"
+            android:pathData="M28,28m-6,0a6,6 0 1,1 12,0a6,6 0 1,1 -12,0" />
+            
+        <!-- Node 2 (Top Right) -->
+        <path
+            android:fillColor="#CCC2DC"
+            android:pathData="M80,28m-6,0a6,6 0 1,1 12,0a6,6 0 1,1 -12,0" />
+
+        <!-- Node 3 (Bottom Center) -->
+        <path
+            android:fillColor="#EFB8C8"
+            android:pathData="M54,84m-7,0a7,7 0 1,1 14,0a7,7 0 1,1 -14,0" />
+
+        <!-- Node 4 (Bottom Left) -->
+        <path
+            android:fillColor="#B8E8FC"
+            android:pathData="M26,70m-5,0a5,5 0 1,1 10,0a5,5 0 1,1 -10,0" />
+
+        <!-- Node 5 (Bottom Right) -->
+        <path
+            android:fillColor="#FDF7C3"
+            android:pathData="M82,70m-5,0a5,5 0 1,1 10,0a5,5 0 1,1 -10,0" />
+            
+    </group>
+</vector>
