@@ -432,7 +432,7 @@ function ConnectorsTab({ connectors, sessionId, onRefresh, api, showAdd, setShow
           {[['Name', 'name', 'Weather API'], ['URL', 'url', 'https://api.example.com/data'], ['Description', 'description', 'Optional description']].map(([label, key, ph]) => (
             <div key={key}>
               <label className="text-xs text-gray-400 mb-1 block">{label}</label>
-              <input value={(form as Record<string, string>)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+              <input value={(form as unknown as Record<string, string>)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                 placeholder={ph} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
             </div>
           ))}
@@ -446,7 +446,7 @@ function ConnectorsTab({ connectors, sessionId, onRefresh, api, showAdd, setShow
           {[['Headers (JSON)', 'headers_json', '{"Authorization": "Bearer token"}'], ['Params (JSON)', 'params_json', '{"limit": "10"}']].map(([label, key, ph]) => (
             <div key={key}>
               <label className="text-xs text-gray-400 mb-1 block">{label}</label>
-              <textarea value={(form as Record<string, string>)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+              <textarea value={(form as unknown as Record<string, string>)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                 placeholder={ph} rows={2}
                 className="w-full bg-gray-700 rounded-lg px-3 py-2 text-xs font-mono outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500 resize-none"/>
             </div>
@@ -553,7 +553,7 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
               ].map(([label, key, ph, type]) => (
                 <div key={key}>
                   <label className="text-xs text-gray-400 mb-1 block">{label}</label>
-                  <input type={type} value={(local as Record<string, string>)[key]} onChange={e => setLocal(s => ({ ...s, [key]: e.target.value }))}
+                  <input type={type} value={(local as unknown as Record<string, string>)[key]} onChange={e => setLocal(s => ({ ...s, [key]: e.target.value }))}
                     placeholder={ph} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
                 </div>
               ))}
@@ -654,7 +654,7 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
             {[['Service Name', 'service_name', 'e.g. OpenWeather'], ['API Key', 'api_key', 'Your API key']].map(([label, key, ph]) => (
               <div key={key}>
                 <label className="text-xs text-gray-400 mb-1 block">{label}</label>
-                <input value={(newSvc as Record<string, string>)[key]} onChange={e => setNewSvc(s => ({ ...s, [key]: e.target.value }))}
+                <input value={(newSvc as unknown as Record<string, string>)[key]} onChange={e => setNewSvc(s => ({ ...s, [key]: e.target.value }))}
                   placeholder={ph} type={key === 'api_key' ? 'password' : 'text'}
                   className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
               </div>
