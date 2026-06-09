@@ -625,6 +625,7 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
 }) {
   const [newSvc, setNewSvc] = useState({ service_name: '', api_key: '' });
   const [loadingRepo, setLoadingRepo] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState('');
 
   const PRESET_SERVICES = [
     { name: 'Railway', placeholder: 'API token (from railway.app/account/tokens)' },
@@ -638,14 +639,24 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
   ];
 
   const connectGitHub = async () => {
+    setConnectError('');
     try {
-      const data = await api('/api/github/connect') as { token: string; username: string; avatar_url?: string } | null;
-      if (data?.username) {
-        onSaveSettings({ ...settings, github_token: data.token, github_username: data.username, github_avatar_url: data.avatar_url || '', is_github_connected: true });
+      const data = await api('/api/github/connect') as { username?: string; avatar_url?: string; error?: string } | null;
+      if (data?.error) {
+        setConnectError(data.error);
+        return;
       }
-    } catch { /* ignore */ }
+      if (data?.username) {
+        onSaveSettings({ ...settings, github_username: data.username, github_avatar_url: data.avatar_url || '', is_github_connected: true });
+      } else {
+        setConnectError('No username returned — check GITHUB_TOKEN on the server.');
+      }
+    } catch (e) {
+      setConnectError(e instanceof Error ? e.message : 'Network error — try again');
+    }
   };
   const disconnectGitHub = () => {
+    setConnectError('');
     onSaveSettings({ ...settings, github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false });
   };
   const addService = async () => {
@@ -661,12 +672,13 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
   const loadRepoToChat = async (repo: GitHubRepo) => {
     setLoadingRepo(repo.full_name);
     try {
-      const token = settings.github_token || undefined;
-      const data = await api(`/api/github/files?repo=${encodeURIComponent(repo.full_name)}${token ? `&token=${encodeURIComponent(token)}` : ''}`) as { items?: { name: string; path: string; type: string }[] };
+      // Use server-side token — no need to pass token in URL
+      const data = await api(`/api/github/files?repo=${encodeURIComponent(repo.full_name)}`) as { items?: { name: string; path: string; type: string }[]; error?: string };
+      if (data?.error) { setLoadingRepo(null); return; }
       const tree = (data?.items || [])
         .map((f: { name: string; type: string }) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}`)
         .join('\n');
-      onAttachRepo({ full_name: repo.full_name, tree: `Root files:\n${tree}` });
+      onAttachRepo({ full_name: repo.full_name, tree: `Root of ${repo.full_name}:\n${tree}` });
     } catch { /* ignore */ } finally {
       setLoadingRepo(null);
     }
@@ -719,7 +731,12 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
           ) : (
             <div className="text-center py-4">
               <Github size={32} className="mx-auto mb-3 text-gray-600"/>
-              <p className="text-sm text-gray-400 mb-3">Connect your GitHub account to view repos and use them in chats</p>
+              <p className="text-sm text-gray-400 mb-3">Connect your GitHub account to view and work on repos</p>
+              {connectError && (
+                <div className="mb-3 bg-red-900/40 border border-red-700/50 rounded-lg px-3 py-2 text-xs text-red-300 text-left">
+                  <AlertCircle size={12} className="inline mr-1"/>{connectError}
+                </div>
+              )}
               <button onClick={connectGitHub} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 mx-auto">
                 <Github size={16}/> Connect GitHub
               </button>
