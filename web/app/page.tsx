@@ -580,7 +580,14 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
 }) {
   const [newSvc, setNewSvc] = useState({ service_name: '', api_key: '' });
 
-  const connectGitHub = () => { window.location.href = '/api/github/auth'; };
+  const connectGitHub = async () => {
+    try {
+      const data = await api('/api/github/connect') as { token: string; username: string; avatar_url?: string } | null;
+      if (data?.username) {
+        onSaveSettings({ ...settings, github_token: data.token, github_username: data.username, github_avatar_url: data.avatar_url || '', is_github_connected: true });
+      }
+    } catch { /* ignore */ }
+  };
   const disconnectGitHub = () => {
     onSaveSettings({ ...settings, github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false });
   };
