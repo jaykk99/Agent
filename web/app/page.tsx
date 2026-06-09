@@ -512,10 +512,16 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
               {models.map(m => <option key={m}>{m}</option>)}
             </select>
           </div>
+          {!local.is_custom_gemini_key_enabled && (
+            <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/40 rounded-lg px-3 py-2">
+              <span className="text-green-400 text-xs">✓</span>
+              <p className="text-xs text-green-300">Server Gemini API key active — chat is ready to use</p>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-200">Use custom Gemini API key</p>
-              <p className="text-xs text-gray-500">Override the server-side key</p>
+              <p className="text-xs text-gray-500">Override the server-side key with your own</p>
             </div>
             <button onClick={() => setLocal(s => ({ ...s, is_custom_gemini_key_enabled: !s.is_custom_gemini_key_enabled }))}
               className={`w-10 h-6 rounded-full transition-colors ${local.is_custom_gemini_key_enabled ? 'bg-indigo-600' : 'bg-gray-600'}`}>
