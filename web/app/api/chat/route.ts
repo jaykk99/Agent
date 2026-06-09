@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
-async function callGemini(apiKey: string, model: string, contents: object[]) {
+async function callGemini(apiKey: string, model: string, contents: object[], useSearch: boolean) {
+  const body: Record<string, unknown> = {
+    contents,
+    generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+  };
+  if (useSearch) {
+    body.tools = [{ google_search: {} }];
+  }
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { temperature: 0.7, maxOutputTokens: 2048 } })
+      body: JSON.stringify(body)
     }
   );
   return res;
@@ -41,6 +48,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ text: data.choices?.[0]?.message?.content || 'No response' });
     }
 
+    const useSearch = !!settings?.enable_web_search;
+
     const contents = [
       ...(history || []).map((h: { role: string; text: string }) => ({
         role: h.role,
@@ -49,26 +58,37 @@ export async function POST(req: NextRequest) {
       { role: 'user', parts: [{ text: message }] }
     ];
 
-    // Build model priority list: requested model first, then fallbacks
+    // Build model priority list
     const requested = settings?.active_model_name || 'gemini-2.5-flash';
     const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
 
     let lastErr = '';
     for (const model of modelsToTry) {
-      const geminiRes = await callGemini(apiKey, model, contents);
+      const geminiRes = await callGemini(apiKey, model, contents, useSearch);
       if (geminiRes.ok) {
         const geminiData = await geminiRes.json();
         const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from Gemini.';
-        // Surface which model was used if it fell back
-        const note = model !== requested ? ` (using ${model} — ${requested} was temporarily unavailable)` : '';
-        return NextResponse.json({ text: text + note });
+        const note = model !== requested ? `\n\n_(used ${model} — ${requested} was temporarily unavailable)_` : '';
+
+        // Include search grounding sources if available
+        const groundingMeta = geminiData.candidates?.[0]?.groundingMetadata;
+        let sourceNote = '';
+        if (groundingMeta?.groundingChunks?.length) {
+          const sources = groundingMeta.groundingChunks
+            .slice(0, 5)
+            .map((c: { web?: { uri: string; title: string } }) => c.web ? `[${c.web.title || c.web.uri}](${c.web.uri})` : null)
+            .filter(Boolean)
+            .join(' · ');
+          if (sources) sourceNote = `\n\n🔍 Sources: ${sources}`;
+        }
+
+        return NextResponse.json({ text: text + note + sourceNote });
       }
       const errText = await geminiRes.text();
-      const errJson = JSON.parse(errText || '{}');
-      const code = errJson?.error?.code;
+      let errCode: number | undefined;
+      try { errCode = JSON.parse(errText)?.error?.code; } catch { /* ignore */ }
       lastErr = errText;
-      // Only retry on transient errors (503) or quota (429) — stop on auth/bad request
-      if (code !== 503 && code !== 429 && code !== 404) break;
+      if (errCode !== 503 && errCode !== 429 && errCode !== 404) break;
     }
 
     return NextResponse.json({ error: lastErr }, { status: 500 });

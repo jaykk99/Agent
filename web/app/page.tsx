@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send, Bot, Plug, Settings, Github, Trash2, Plus, Copy, Check,
-  ChevronDown, ChevronUp, Loader2, X, AlertCircle, LogOut
+  ChevronDown, ChevronUp, Loader2, X, AlertCircle, LogOut,
+  Globe, FolderOpen, ExternalLink
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────── */
@@ -39,6 +40,7 @@ interface AppSettings {
   github_username: string;
   github_avatar_url: string;
   is_github_connected: boolean;
+  enable_web_search: boolean;
 }
 interface GitHubRepo { id: number; name: string; full_name: string; description: string; html_url: string; language: string; stargazers_count: number; }
 
@@ -47,9 +49,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   active_model_name: 'gemini-2.5-flash', is_custom_model_enabled: false,
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
+  enable_web_search: false,
 };
 
-const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro'];
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
 
@@ -69,6 +72,7 @@ export default function Home() {
   const [showAddConnector, setShowAddConnector] = useState(false);
   const [showAddService, setShowAddService] = useState(false);
   const [expandedMsg, setExpandedMsg] = useState<number | null>(null);
+  const [attachedRepo, setAttachedRepo] = useState<{ full_name: string; tree: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -177,9 +181,12 @@ export default function Home() {
         await api('/api/db/messages', { method: 'POST', body: JSON.stringify({ session_id: sessionId, ...aiMsg }) });
       } else {
         const history = messages.slice(-20).map(m => ({ role: m.is_user ? 'user' : 'model', text: m.text }));
+        const messageWithContext = attachedRepo
+          ? `[Repo context: ${attachedRepo.full_name}]\n${attachedRepo.tree}\n\n---\n${text}`
+          : text;
         const resp = await api('/api/chat', {
           method: 'POST',
-          body: JSON.stringify({ message: text, history, session_id: sessionId, settings }),
+          body: JSON.stringify({ message: messageWithContext, history, session_id: sessionId, settings }),
         });
         aiText = resp.text || 'No response.';
         const aiMsg: Message = { text: aiText, is_user: false, status: 'SUCCESS' };
@@ -336,6 +343,24 @@ export default function Home() {
               <div ref={messagesEndRef}/>
             </div>
             <div className="p-4 border-t border-gray-800 bg-gray-950">
+              {/* Attached context badges */}
+              {(attachedRepo || settings.enable_web_search) && (
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  {attachedRepo && (
+                    <div className="flex items-center gap-1.5 bg-indigo-900/40 border border-indigo-700/40 rounded-full px-2.5 py-1 text-xs text-indigo-300">
+                      <FolderOpen size={11}/>
+                      <span>{attachedRepo.full_name}</span>
+                      <button onClick={() => setAttachedRepo(null)} className="hover:text-red-400 ml-0.5"><X size={10}/></button>
+                    </div>
+                  )}
+                  {settings.enable_web_search && (
+                    <div className="flex items-center gap-1.5 bg-green-900/30 border border-green-700/30 rounded-full px-2.5 py-1 text-xs text-green-400">
+                      <Globe size={11}/>
+                      <span>Web search on</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex items-end gap-2 bg-gray-800 rounded-2xl px-3 py-2">
                 <textarea
                   ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
@@ -374,6 +399,7 @@ export default function Home() {
             serviceConns={serviceConns} sessionId={sessionId}
             onSaveSettings={saveSettings} onRefreshConns={fetchServiceConns} api={api}
             showAdd={showAddService} setShowAdd={setShowAddService}
+            onAttachRepo={(repo) => { setAttachedRepo(repo); setTab('chat'); }}
           />
         )}
       </div>
@@ -511,6 +537,7 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
               className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
               {models.map(m => <option key={m}>{m}</option>)}
             </select>
+            <p className="text-xs text-gray-500 mt-1">gemini-2.5-flash — fastest · gemini-2.5-flash-lite — most efficient</p>
           </div>
           {!local.is_custom_gemini_key_enabled && (
             <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/40 rounded-lg px-3 py-2">
@@ -518,6 +545,17 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
               <p className="text-xs text-green-300">Server Gemini API key active — chat is ready to use</p>
             </div>
           )}
+          {/* Web Search */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-200 flex items-center gap-1.5"><Globe size={14} className="text-green-400"/>Web search</p>
+              <p className="text-xs text-gray-500">Let the AI browse the internet for current info</p>
+            </div>
+            <button onClick={() => setLocal(s => ({ ...s, enable_web_search: !s.enable_web_search }))}
+              className={`w-10 h-6 rounded-full transition-colors ${local.enable_web_search ? 'bg-green-600' : 'bg-gray-600'}`}>
+              <div className={`w-4 h-4 bg-white rounded-full mx-1 transition-transform ${local.enable_web_search ? 'translate-x-4' : ''}`}/>
+            </button>
+          </div>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-200">Use a different Gemini API key</p>
@@ -576,15 +614,28 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
 }
 
 /* ─── Integrations Tab ─────────────────────────────── */
-function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, sessionId, onSaveSettings, onRefreshConns, api, showAdd, setShowAdd }: {
+function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, sessionId, onSaveSettings, onRefreshConns, api, showAdd, setShowAdd, onAttachRepo }: {
   settings: AppSettings; githubRepos: GitHubRepo[]; githubLoading: boolean;
   serviceConns: ServiceConnection[]; sessionId: string;
   onSaveSettings: (s: AppSettings) => void;
   onRefreshConns: () => void;
   api: (path: string, opts?: RequestInit) => Promise<unknown>;
   showAdd: boolean; setShowAdd: (v: boolean) => void;
+  onAttachRepo: (repo: { full_name: string; tree: string }) => void;
 }) {
   const [newSvc, setNewSvc] = useState({ service_name: '', api_key: '' });
+  const [loadingRepo, setLoadingRepo] = useState<string | null>(null);
+
+  const PRESET_SERVICES = [
+    { name: 'Railway', placeholder: 'API token (from railway.app/account/tokens)' },
+    { name: 'OpenAI', placeholder: 'sk-...' },
+    { name: 'Anthropic', placeholder: 'sk-ant-...' },
+    { name: 'Stripe', placeholder: 'sk_live_... or sk_test_...' },
+    { name: 'Supabase', placeholder: 'Service role key' },
+    { name: 'Resend', placeholder: 're_...' },
+    { name: 'Upstash Redis', placeholder: 'Redis REST token' },
+    { name: 'PlanetScale', placeholder: 'Database URL / token' },
+  ];
 
   const connectGitHub = async () => {
     try {
@@ -605,6 +656,20 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
   const delService = async (id?: number) => {
     if (!id) return;
     await api(`/api/db/service-connections?id=${id}`, { method: 'DELETE' }); onRefreshConns();
+  };
+
+  const loadRepoToChat = async (repo: GitHubRepo) => {
+    setLoadingRepo(repo.full_name);
+    try {
+      const token = settings.github_token || undefined;
+      const data = await api(`/api/github/files?repo=${encodeURIComponent(repo.full_name)}${token ? `&token=${encodeURIComponent(token)}` : ''}`) as { items?: { name: string; path: string; type: string }[] };
+      const tree = (data?.items || [])
+        .map((f: { name: string; type: string }) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}`)
+        .join('\n');
+      onAttachRepo({ full_name: repo.full_name, tree: `Root files:\n${tree}` });
+    } catch { /* ignore */ } finally {
+      setLoadingRepo(null);
+    }
   };
 
   return (
@@ -628,16 +693,25 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
               {githubLoading ? (
                 <div className="flex items-center gap-2 text-sm text-gray-400"><Loader2 size={14} className="animate-spin"/> Loading repos…</div>
               ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
+                <div className="space-y-2 max-h-72 overflow-y-auto">
                   {githubRepos.map(r => (
-                    <a key={r.id} href={r.html_url} target="_blank" rel="noopener noreferrer"
-                      className="block bg-gray-700/50 hover:bg-gray-700 rounded-lg p-3 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-white">{r.name}</span>
-                        {r.language && <span className="text-xs text-gray-400">{r.language}</span>}
+                    <div key={r.id} className="bg-gray-700/50 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <a href={r.html_url} target="_blank" rel="noopener noreferrer"
+                          className="text-sm font-medium text-white hover:text-indigo-300 flex items-center gap-1">
+                          {r.name} <ExternalLink size={11} className="text-gray-500"/>
+                        </a>
+                        <div className="flex items-center gap-1.5">
+                          {r.language && <span className="text-xs text-gray-400">{r.language}</span>}
+                          <button onClick={() => loadRepoToChat(r)} disabled={loadingRepo === r.full_name}
+                            className="text-xs bg-indigo-700 hover:bg-indigo-600 px-2 py-0.5 rounded-md flex items-center gap-1 transition-colors disabled:opacity-60">
+                            {loadingRepo === r.full_name ? <Loader2 size={10} className="animate-spin"/> : <FolderOpen size={10}/>}
+                            Load to chat
+                          </button>
+                        </div>
                       </div>
-                      {r.description && <p className="text-xs text-gray-500 mt-0.5 truncate">{r.description}</p>}
-                    </a>
+                      {r.description && <p className="text-xs text-gray-500 truncate">{r.description}</p>}
+                    </div>
                   ))}
                 </div>
               )}
@@ -657,21 +731,34 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
       {/* Service connections */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-medium text-gray-300">Service API Keys</h3>
+          <h3 className="font-medium text-gray-300">3rd Party Services</h3>
           <button onClick={() => setShowAdd(!showAdd)} className="flex items-center gap-1 text-xs bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg transition-colors">
             {showAdd ? <X size={12}/> : <Plus size={12}/>} {showAdd ? 'Cancel' : 'Add'}
           </button>
         </div>
         {showAdd && (
           <div className="bg-gray-800 rounded-xl p-4 mb-3 space-y-3">
-            {[['Service Name', 'service_name', 'e.g. OpenWeather'], ['API Key', 'api_key', 'Your API key']].map(([label, key, ph]) => (
-              <div key={key}>
-                <label className="text-xs text-gray-400 mb-1 block">{label}</label>
-                <input value={(newSvc as unknown as Record<string, string>)[key]} onChange={e => setNewSvc(s => ({ ...s, [key]: e.target.value }))}
-                  placeholder={ph} type={key === 'api_key' ? 'password' : 'text'}
-                  className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Service</label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {PRESET_SERVICES.map(p => (
+                  <button key={p.name} onClick={() => setNewSvc(s => ({ ...s, service_name: p.name }))}
+                    className={`text-xs px-2 py-1 rounded-md transition-colors ${newSvc.service_name === p.name ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+                    {p.name}
+                  </button>
+                ))}
               </div>
-            ))}
+              <input value={newSvc.service_name} onChange={e => setNewSvc(s => ({ ...s, service_name: e.target.value }))}
+                placeholder="Or type a custom service name"
+                className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">API Key / Token</label>
+              <input value={newSvc.api_key} onChange={e => setNewSvc(s => ({ ...s, api_key: e.target.value }))}
+                placeholder={PRESET_SERVICES.find(p => p.name === newSvc.service_name)?.placeholder || 'Your API key'}
+                type="password"
+                className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
+            </div>
             <button onClick={addService} className="w-full bg-indigo-600 hover:bg-indigo-500 rounded-lg py-2 text-sm font-medium transition-colors">Save</button>
           </div>
         )}
