@@ -44,7 +44,7 @@ interface GitHubRepo { id: number; name: string; full_name: string; description:
 
 const DEFAULT_SETTINGS: AppSettings = {
   is_custom_gemini_key_enabled: false, custom_gemini_api_key: '',
-  active_model_name: 'gemini-2.0-flash', is_custom_model_enabled: false,
+  active_model_name: 'gemini-2.5-flash', is_custom_model_enabled: false,
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
 };

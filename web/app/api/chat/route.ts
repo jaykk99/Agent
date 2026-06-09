@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
     const modelName = settings?.is_custom_model_enabled && settings?.custom_model_endpoint
       ? null
-      : (settings?.active_model_name || 'gemini-1.5-flash');
+      : (settings?.active_model_name || 'gemini-2.5-flash');
 
     // Use custom model endpoint if configured
     if (settings?.is_custom_model_enabled && settings?.custom_model_endpoint) {
