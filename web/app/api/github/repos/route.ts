@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest) {
-  const token = req.nextUrl.searchParams.get('token');
+  const token = req.nextUrl.searchParams.get('token') || process.env.GITHUB_TOKEN;
   if (!token) return NextResponse.json({ error: 'No token' }, { status: 400 });
   try {
     const res = await fetch('https://api.github.com/user/repos?sort=updated&per_page=30', {
