@@ -638,22 +638,10 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
     { name: 'PlanetScale', placeholder: 'Database URL / token' },
   ];
 
-  const connectGitHub = async () => {
-    setConnectError('');
-    try {
-      const data = await api('/api/github/connect') as { username?: string; avatar_url?: string; error?: string } | null;
-      if (data?.error) {
-        setConnectError(data.error);
-        return;
-      }
-      if (data?.username) {
-        onSaveSettings({ ...settings, github_username: data.username, github_avatar_url: data.avatar_url || '', is_github_connected: true });
-      } else {
-        setConnectError('No username returned — check GITHUB_TOKEN on the server.');
-      }
-    } catch (e) {
-      setConnectError(e instanceof Error ? e.message : 'Network error — try again');
-    }
+  const connectGitHub = () => {
+    // Kick off GitHub OAuth — callback will set gh_token/gh_user/gh_avatar in URL params
+    window.location.href = '/api/github/auth';
+  };
   };
   const disconnectGitHub = () => {
     setConnectError('');
