@@ -41,6 +41,12 @@ interface AppSettings {
   github_avatar_url: string;
   is_github_connected: boolean;
   enable_web_search: boolean;
+  supabase_access_token: string;
+  supabase_username: string;
+  is_supabase_connected: boolean;
+  vercel_access_token: string;
+  vercel_username: string;
+  is_vercel_connected: boolean;
 }
 interface GitHubRepo { id: number; name: string; full_name: string; description: string; html_url: string; language: string; stargazers_count: number; }
 
@@ -50,6 +56,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
   enable_web_search: false,
+  supabase_access_token: '', supabase_username: '', is_supabase_connected: false,
+  vercel_access_token: '', vercel_username: '', is_vercel_connected: false,
 };
 
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
@@ -96,8 +104,21 @@ export default function Home() {
     const ghUser = params.get('gh_user');
     const ghAvatar = params.get('gh_avatar');
     if (ghToken && ghUser) {
-      const updated = { ...DEFAULT_SETTINGS, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true };
-      saveSettings(updated);
+      saveSettings({ ...settings, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true });
+      window.history.replaceState({}, '', '/');
+      setTab('integrations');
+    }
+    const sbToken = params.get('sb_token');
+    const sbUser  = params.get('sb_user');
+    if (sbToken && sbUser) {
+      saveSettings({ ...settings, supabase_access_token: sbToken, supabase_username: sbUser, is_supabase_connected: true });
+      window.history.replaceState({}, '', '/');
+      setTab('integrations');
+    }
+    const vrToken = params.get('vr_token');
+    const vrUser  = params.get('vr_user');
+    if (vrToken && vrUser) {
+      saveSettings({ ...settings, vercel_access_token: vrToken, vercel_username: vrUser, is_vercel_connected: true });
       window.history.replaceState({}, '', '/');
       setTab('integrations');
     }
@@ -642,9 +663,18 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
     // Kick off GitHub OAuth — callback will set gh_token/gh_user/gh_avatar in URL params
     window.location.href = '/api/github/auth';
   };
+  };
   const disconnectGitHub = () => {
     setConnectError('');
     onSaveSettings({ ...settings, github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false });
+  };
+  const disconnectSupabase = () => {
+    setConnectError('');
+    onSaveSettings({ ...settings, supabase_access_token: '', supabase_username: '', is_supabase_connected: false });
+  };
+  const disconnectVercel = () => {
+    setConnectError('');
+    onSaveSettings({ ...settings, vercel_access_token: '', vercel_username: '', is_vercel_connected: false });
   };
   const addService = async () => {
     if (!newSvc.service_name || !newSvc.api_key) return;
@@ -726,6 +756,71 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
               )}
               <button onClick={connectGitHub} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 mx-auto">
                 <Github size={16}/> Connect GitHub
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+
+      {/* Supabase */}
+      <div>
+        <h2 className="font-semibold text-white mb-4">Supabase</h2>
+        <div className="bg-gray-800 rounded-xl p-4">
+          {settings.is_supabase_connected ? (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-700 flex items-center justify-center text-white font-bold text-sm">SB</div>
+                <div>
+                  <p className="font-medium text-white">{settings.supabase_username}</p>
+                  <p className="text-xs text-green-400">● Connected</p>
+                </div>
+                <button onClick={disconnectSupabase} className="ml-auto text-gray-500 hover:text-red-400 p-1 transition-colors"><LogOut size={16}/></button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-4">
+              <div className="w-8 h-8 rounded-full bg-emerald-800 flex items-center justify-center text-emerald-300 font-bold text-xs mx-auto mb-3">SB</div>
+              <p className="text-sm text-gray-400 mb-3">Connect your Supabase account to manage projects</p>
+              {connectError === 'supabase' && (
+                <div className="mb-3 bg-red-900/40 border border-red-700/50 rounded-lg px-3 py-2 text-xs text-red-300 text-left">
+                  <AlertCircle size={12} className="inline mr-1"/>OAuth not configured — add SUPABASE_OAUTH_CLIENT_ID &amp; SECRET to Vercel
+                </div>
+              )}
+              <button onClick={connectSupabase} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 mx-auto">
+                <Globe size={16}/> Connect Supabase
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Vercel */}
+      <div>
+        <h2 className="font-semibold text-white mb-4">Vercel</h2>
+        <div className="bg-gray-800 rounded-xl p-4">
+          {settings.is_vercel_connected ? (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center text-white font-bold text-sm">▲</div>
+                <div>
+                  <p className="font-medium text-white">{settings.vercel_username}</p>
+                  <p className="text-xs text-green-400">● Connected</p>
+                </div>
+                <button onClick={disconnectVercel} className="ml-auto text-gray-500 hover:text-red-400 p-1 transition-colors"><LogOut size={16}/></button>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-4">
+              <div className="w-8 h-8 rounded-full bg-gray-900 flex items-center justify-center text-white font-bold text-sm mx-auto mb-3">▲</div>
+              <p className="text-sm text-gray-400 mb-3">Connect your Vercel account to manage deployments</p>
+              {connectError === 'vercel' && (
+                <div className="mb-3 bg-red-900/40 border border-red-700/50 rounded-lg px-3 py-2 text-xs text-red-300 text-left">
+                  <AlertCircle size={12} className="inline mr-1"/>OAuth not configured — add VERCEL_OAUTH_CLIENT_ID &amp; SECRET to Vercel
+                </div>
+              )}
+              <button onClick={connectVercel} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 mx-auto">
+                <Globe size={16}/> Connect Vercel
               </button>
             </div>
           )}
