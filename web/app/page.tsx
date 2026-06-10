@@ -642,7 +642,6 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
     // Kick off GitHub OAuth — callback will set gh_token/gh_user/gh_avatar in URL params
     window.location.href = '/api/github/auth';
   };
-  };
   const disconnectGitHub = () => {
     setConnectError('');
     onSaveSettings({ ...settings, github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false });
