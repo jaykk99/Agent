@@ -100,6 +100,12 @@ export default function Home() {
     fetchServiceConns();
     // Handle GitHub OAuth callback
     const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get('error');
+    if (oauthError) {
+      setConnectError(`OAuth failed: ${oauthError}`);
+      window.history.replaceState({}, '', '/');
+      setTab('integrations');
+    }
     const ghToken = params.get('gh_token');
     const ghUser = params.get('gh_user');
     const ghAvatar = params.get('gh_avatar');
