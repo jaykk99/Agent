@@ -104,6 +104,40 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
 
 const FALLBACK_MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
+// ── HuggingFace model IDs (prefix "hf:" routes to HF Inference API) ─────────
+const HF_MODELS: Record<string, string> = {
+  'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking':
+    'DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
+};
+
+async function callHuggingFace(
+  hfToken: string,
+  modelId: string,
+  messages: Array<{ role: string; content: string }>,
+): Promise<string> {
+  const url = `https://api-inference.huggingface.co/models/${modelId}/v1/chat/completions`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${hfToken}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages,
+      max_tokens: 4096,
+      temperature: 0.7,
+      stream: false,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HuggingFace API error (${res.status}): ${err.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  return data?.choices?.[0]?.message?.content ?? '';
+}
+
 const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, authenticated access to GitHub repositories, Supabase databases, and Vercel deployments. You think deeply, write production-quality code, and always complete tasks end-to-end without asking the user to do anything manually.
 
 ## CORE RULES (never break these)
@@ -784,7 +818,27 @@ export async function POST(req: NextRequest) {
     const userGhToken: string = settings?.github_token || '';  // User's OAuth GitHub token
     const hasSb = !!sbToken;
     const hasVr = !!vrToken;
-    const requested = settings?.active_model_name || 'gemini-2.5-flash';
+    const requested = settings?.active_model_name || 'gemini-2.5-pro';
+
+    // ── HuggingFace routing ─────────────────────────────────────────────────
+    if (requested.startsWith('hf:')) {
+      const hfModelId = HF_MODELS[requested] ?? requested.slice(3);
+      const hfToken = settings?.hf_api_key || process.env.HF_TOKEN || '';
+      if (!hfToken) {
+        return NextResponse.json({ error: 'No HuggingFace API token configured. Add your HF token in Model Settings.' }, { status: 400 });
+      }
+      const hfMessages = [
+        ...history.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: message },
+      ];
+      try {
+        const answer = await callHuggingFace(hfToken, hfModelId, hfMessages);
+        return NextResponse.json({ response: answer, model: hfModelId });
+      } catch (e) {
+        return NextResponse.json({ error: e instanceof Error ? e.message : 'HuggingFace error' }, { status: 500 });
+      }
+    }
+
     const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
 
     // Build initial conversation history
