@@ -74,6 +74,125 @@ const GITHUB_TOOLS = {
   ]
 };
 
+const SUPABASE_TOOLS = {
+  functionDeclarations: [
+    {
+      name: 'list_supabase_tables',
+      description: 'List all tables in the connected Supabase project.',
+      parameters: { type: 'object', properties: {}, required: [] }
+    },
+    {
+      name: 'query_supabase',
+      description: 'Run a SELECT query against a Supabase table. Returns rows as JSON.',
+      parameters: {
+        type: 'object',
+        properties: {
+          table: { type: 'string', description: 'Table name to query' },
+          select: { type: 'string', description: 'Columns to select, e.g. "*" or "id,name,email"' },
+          filter: { type: 'string', description: 'Optional PostgREST filter, e.g. "status=eq.active&limit=20"' }
+        },
+        required: ['table']
+      }
+    },
+    {
+      name: 'insert_supabase_row',
+      description: 'Insert a new row into a Supabase table.',
+      parameters: {
+        type: 'object',
+        properties: {
+          table: { type: 'string', description: 'Table name' },
+          data: { type: 'string', description: 'JSON object of column:value pairs to insert' }
+        },
+        required: ['table', 'data']
+      }
+    },
+    {
+      name: 'update_supabase_rows',
+      description: 'Update rows in a Supabase table matching a filter.',
+      parameters: {
+        type: 'object',
+        properties: {
+          table: { type: 'string', description: 'Table name' },
+          filter: { type: 'string', description: 'PostgREST filter to match rows, e.g. "id=eq.5"' },
+          data: { type: 'string', description: 'JSON object of column:value pairs to update' }
+        },
+        required: ['table', 'filter', 'data']
+      }
+    },
+    {
+      name: 'delete_supabase_rows',
+      description: 'Delete rows from a Supabase table matching a filter.',
+      parameters: {
+        type: 'object',
+        properties: {
+          table: { type: 'string', description: 'Table name' },
+          filter: { type: 'string', description: 'PostgREST filter to identify rows to delete, e.g. "id=eq.5"' }
+        },
+        required: ['table', 'filter']
+      }
+    }
+  ]
+};
+
+const VERCEL_TOOLS = {
+  functionDeclarations: [
+    {
+      name: 'list_vercel_projects',
+      description: 'List all Vercel projects in the connected account.',
+      parameters: { type: 'object', properties: {}, required: [] }
+    },
+    {
+      name: 'list_vercel_deployments',
+      description: 'List recent deployments for a Vercel project.',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'Vercel project ID or name' },
+          limit: { type: 'string', description: 'Number of deployments to return (default 10)' }
+        },
+        required: ['projectId']
+      }
+    },
+    {
+      name: 'get_vercel_env_vars',
+      description: 'List environment variables for a Vercel project (values are redacted for security).',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'Vercel project ID or name' }
+        },
+        required: ['projectId']
+      }
+    },
+    {
+      name: 'add_vercel_env_var',
+      description: 'Add or update an environment variable in a Vercel project.',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'Vercel project ID or name' },
+          key: { type: 'string', description: 'Environment variable name' },
+          value: { type: 'string', description: 'Environment variable value' },
+          target: { type: 'string', description: 'Deployment targets: "production", "preview", "development" (comma-separated for multiple)' }
+        },
+        required: ['projectId', 'key', 'value']
+      }
+    },
+    {
+      name: 'trigger_vercel_redeploy',
+      description: 'Trigger a redeployment of the latest production deployment for a Vercel project.',
+      parameters: {
+        type: 'object',
+        properties: {
+          deploymentId: { type: 'string', description: 'Deployment ID to redeploy' }
+        },
+        required: ['deploymentId']
+      }
+    }
+  ]
+};
+
+
 async function executeGithubFunction(name: string, args: Record<string, string>): Promise<string> {
   const token = process.env.GITHUB_TOKEN;
   if (!token && name !== 'run_shell_command') return 'Error: GITHUB_TOKEN is not configured on the server';
@@ -163,18 +282,152 @@ async function executeGithubFunction(name: string, args: Record<string, string>)
   }
 }
 
+async function executeSupabaseFunction(name: string, args: Record<string, string>, sbToken: string, sbUrl: string): Promise<string> {
+  if (!sbToken) return 'Error: Not connected to Supabase. Please sign in via Integrations → Connect Supabase.';
+  const base = sbUrl || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  if (!base) return 'Error: Supabase URL not configured.';
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${sbToken}`,
+    'apikey': sbToken,
+    'Content-Type': 'application/json',
+    'Prefer': 'return=representation'
+  };
+
+  try {
+    if (name === 'list_supabase_tables') {
+      const res = await fetch(`${base}/rest/v1/?apikey=${sbToken}`, { headers });
+      if (!res.ok) return `Error: ${res.status} ${res.statusText}`;
+      const data = await res.json();
+      const tables = Object.keys(data?.definitions || {});
+      return tables.length ? `Tables: ${tables.join(', ')}` : 'No tables found (or insufficient permissions)';
+    }
+
+    if (name === 'query_supabase') {
+      const { table, select = '*', filter = '' } = args;
+      const url = `${base}/rest/v1/${table}?select=${select}${filter ? '&' + filter : ''}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) { const e = await res.text(); return `Error querying ${table}: ${e}`; }
+      const rows = await res.json();
+      return JSON.stringify(rows, null, 2);
+    }
+
+    if (name === 'insert_supabase_row') {
+      const { table, data } = args;
+      let parsed: object;
+      try { parsed = JSON.parse(data); } catch { return 'Error: data must be valid JSON'; }
+      const res = await fetch(`${base}/rest/v1/${table}`, {
+        method: 'POST', headers, body: JSON.stringify(parsed)
+      });
+      if (!res.ok) { const e = await res.text(); return `Error inserting into ${table}: ${e}`; }
+      const result = await res.json();
+      return `✅ Inserted: ${JSON.stringify(result)}`;
+    }
+
+    if (name === 'update_supabase_rows') {
+      const { table, filter, data } = args;
+      let parsed: object;
+      try { parsed = JSON.parse(data); } catch { return 'Error: data must be valid JSON'; }
+      const res = await fetch(`${base}/rest/v1/${table}?${filter}`, {
+        method: 'PATCH', headers, body: JSON.stringify(parsed)
+      });
+      if (!res.ok) { const e = await res.text(); return `Error updating ${table}: ${e}`; }
+      const result = await res.json();
+      return `✅ Updated: ${JSON.stringify(result)}`;
+    }
+
+    if (name === 'delete_supabase_rows') {
+      const { table, filter } = args;
+      const res = await fetch(`${base}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers });
+      if (!res.ok) { const e = await res.text(); return `Error deleting from ${table}: ${e}`; }
+      return `✅ Deleted rows matching: ${filter}`;
+    }
+
+    return `Unknown Supabase function: ${name}`;
+  } catch (e) {
+    return `Supabase error: ${e instanceof Error ? e.message : 'Unknown'}`;
+  }
+}
+
+async function executeVercelFunction(name: string, args: Record<string, string>, vrToken: string): Promise<string> {
+  if (!vrToken) return 'Error: Not connected to Vercel. Please sign in via Integrations → Connect Vercel.';
+  const headers = { 'Authorization': `Bearer ${vrToken}`, 'Content-Type': 'application/json' };
+
+  try {
+    if (name === 'list_vercel_projects') {
+      const res = await fetch('https://api.vercel.com/v9/projects?limit=20', { headers });
+      if (!res.ok) return `Error: ${res.status} ${await res.text()}`;
+      const data = await res.json();
+      const projects = (data.projects || []).map((p: { id: string; name: string; framework: string }) =>
+        `${p.name} (id: ${p.id}, framework: ${p.framework || 'static'})`
+      );
+      return projects.length ? projects.join('\n') : 'No projects found';
+    }
+
+    if (name === 'list_vercel_deployments') {
+      const { projectId, limit = '10' } = args;
+      const res = await fetch(`https://api.vercel.com/v6/deployments?projectId=${projectId}&limit=${limit}`, { headers });
+      if (!res.ok) return `Error: ${res.status} ${await res.text()}`;
+      const data = await res.json();
+      const deps = (data.deployments || []).map((d: { uid: string; url: string; state: string; createdAt: number; meta?: { githubCommitMessage?: string } }) =>
+        `${d.uid} | ${d.state} | ${new Date(d.createdAt).toISOString().slice(0, 16)} | ${d.url} | ${d.meta?.githubCommitMessage || ''}`
+      );
+      return deps.length ? deps.join('\n') : 'No deployments found';
+    }
+
+    if (name === 'get_vercel_env_vars') {
+      const { projectId } = args;
+      const res = await fetch(`https://api.vercel.com/v9/projects/${projectId}/env`, { headers });
+      if (!res.ok) return `Error: ${res.status} ${await res.text()}`;
+      const data = await res.json();
+      const envs = (data.envs || []).map((e: { key: string; target: string[]; type: string }) =>
+        `${e.key} [${e.target?.join(',')}] (${e.type})`
+      );
+      return envs.length ? envs.join('\n') : 'No env vars found';
+    }
+
+    if (name === 'add_vercel_env_var') {
+      const { projectId, key, value, target = 'production,preview' } = args;
+      const targets = target.split(',').map(t => t.trim());
+      const body = { key, value, target: targets, type: 'plain' };
+      const res = await fetch(`https://api.vercel.com/v10/projects/${projectId}/env`, {
+        method: 'POST', headers, body: JSON.stringify(body)
+      });
+      if (!res.ok) return `Error: ${res.status} ${await res.text()}`;
+      return `✅ Added env var ${key} to project ${projectId}`;
+    }
+
+    if (name === 'trigger_vercel_redeploy') {
+      const { deploymentId } = args;
+      const res = await fetch(`https://api.vercel.com/v13/deployments?forceNew=1`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ deploymentId, name: deploymentId })
+      });
+      if (!res.ok) return `Error: ${res.status} ${await res.text()}`;
+      const data = await res.json();
+      return `✅ Redeployment triggered: ${data.id} — ${data.url}`;
+    }
+
+    return `Unknown Vercel function: ${name}`;
+  } catch (e) {
+    return `Vercel error: ${e instanceof Error ? e.message : 'Unknown'}`;
+  }
+}
+
+
 // Build Gemini-compatible tools array (search + function declarations can coexist)
-function buildTools(useSearch: boolean) {
+function buildTools(useSearch: boolean, hasSb: boolean, hasVr: boolean) {
   const tools: object[] = [GITHUB_TOOLS];
+  if (hasSb) tools.push(SUPABASE_TOOLS);
+  if (hasVr) tools.push(VERCEL_TOOLS);
   if (useSearch) tools.push({ google_search: {} });
   return tools;
 }
 
-async function callGemini(apiKey: string, model: string, contents: object[], useSearch: boolean) {
+async function callGemini(apiKey: string, model: string, contents: object[], useSearch: boolean, hasSb = false, hasVr = false) {
   const body = {
     system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
     contents,
-    tools: buildTools(useSearch),
+    tools: buildTools(useSearch, hasSb, hasVr),
     generationConfig: { temperature: 0.4, maxOutputTokens: 8192 }
   };
 
@@ -195,6 +448,11 @@ export async function POST(req: NextRequest) {
     if (!apiKey) return NextResponse.json({ error: 'No Gemini API key configured' }, { status: 400 });
 
     const useSearch = !!settings?.enable_web_search;
+    const sbToken: string = settings?.supabase_access_token || '';
+    const sbUrl: string = settings?.supabase_url || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const vrToken: string = settings?.vercel_access_token || '';
+    const hasSb = !!sbToken;
+    const hasVr = !!vrToken;
     const requested = settings?.active_model_name || 'gemini-2.5-flash';
     const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
 
@@ -212,7 +470,7 @@ export async function POST(req: NextRequest) {
     // Try models with fallback
     let geminiRes: Response | null = null;
     for (const model of modelsToTry) {
-      const res = await callGemini(apiKey, model, baseContents, useSearch);
+      const res = await callGemini(apiKey, model, baseContents, useSearch, hasSb, hasVr);
       if (res.ok) { geminiRes = res; usedModel = model; break; }
       const errText = await res.text();
       let errCode: number | undefined;
@@ -269,7 +527,16 @@ export async function POST(req: NextRequest) {
       const fnResults = await Promise.all(
         fnCalls.map(async (p) => {
           const fn = p.functionCall!;
-          const result = await executeGithubFunction(fn.name, fn.args || {});
+          const sbFns = ['list_supabase_tables','query_supabase','insert_supabase_row','update_supabase_rows','delete_supabase_rows'];
+          const vrFns = ['list_vercel_projects','list_vercel_deployments','get_vercel_env_vars','add_vercel_env_var','trigger_vercel_redeploy'];
+          let result: string;
+          if (sbFns.includes(fn.name)) {
+            result = await executeSupabaseFunction(fn.name, fn.args || {}, sbToken, sbUrl);
+          } else if (vrFns.includes(fn.name)) {
+            result = await executeVercelFunction(fn.name, fn.args || {}, vrToken);
+          } else {
+            result = await executeGithubFunction(fn.name, fn.args || {});
+          }
           return {
             functionResponse: {
               name: fn.name,
@@ -287,7 +554,7 @@ export async function POST(req: NextRequest) {
       ];
 
       // Next Gemini turn
-      currentRes = await callGemini(apiKey, usedModel, currentContents, useSearch);
+      currentRes = await callGemini(apiKey, usedModel, currentContents, useSearch, hasSb, hasVr);
       if (!currentRes.ok) {
         const err = await currentRes.text();
         return NextResponse.json({ error: err }, { status: 500 });
