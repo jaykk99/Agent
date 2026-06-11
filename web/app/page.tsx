@@ -60,7 +60,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   vercel_access_token: '', vercel_username: '', is_vercel_connected: false,
 };
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+];
 
 type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
 
@@ -881,3 +885,4 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
     </div>
   );
 }
+
