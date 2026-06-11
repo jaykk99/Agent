@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Launch
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -332,15 +333,16 @@ fun ChatScreen(viewModel: AgentViewModel) {
 
         // Bottom input Bar
         Card(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
             ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier
-                    .padding(12.dp)
+                    .padding(16.dp)
                     .fillMaxWidth()
                     .imePadding(),
                 verticalAlignment = Alignment.CenterVertically
@@ -356,10 +358,12 @@ fun ChatScreen(viewModel: AgentViewModel) {
                     maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.Transparent
                     )
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 IconButton(
                     onClick = {
                         if (inputText.isNotBlank()) {
@@ -368,7 +372,7 @@ fun ChatScreen(viewModel: AgentViewModel) {
                         }
                     },
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(52.dp)
                         .background(MaterialTheme.colorScheme.primary, CircleShape)
                         .testTag("chat_send_button")
                 ) {
@@ -393,16 +397,16 @@ fun SuggestionItem(suggestion: String, onClick: (String) -> Unit) {
             .clickable { onClick(suggestion) }
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.Launch,
+                imageVector = Icons.AutoMirrored.Filled.Launch,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSecondaryContainer
             )
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Text(
                 text = suggestion,
                 style = MaterialTheme.typography.bodySmall,
