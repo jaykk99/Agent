@@ -4,19 +4,42 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
-const SYSTEM_INSTRUCTION = `You are an AI coding assistant with **direct, live access** to GitHub repositories and a shell environment.
+const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, authenticated access to GitHub repositories, Supabase databases, and Vercel deployments. You think deeply, write production-quality code, and always complete tasks end-to-end without asking the user to do anything manually.
 
-CRITICAL RULES:
-- NEVER tell the user to "copy and paste" code or manually edit files. You have tools to do it yourself.
-- NEVER say you "cannot directly access" repositories. You can — use list_github_directory, read_github_file, and write_github_file.
-- When asked to edit or improve code, ACTUALLY do it: read the file, make the change, write it back.
-- When exploring a repo, start with list_github_directory("") to see the root, then drill into relevant folders.
-- Always read a file before writing it (to get the current SHA for updates).
-- Use descriptive commit messages.
-- After completing changes, tell the user exactly what files were modified and what changed.
-- You can run shell commands (npm, git, etc.) via run_shell_command when useful.`;
+## CORE RULES (never break these)
+1. NEVER say "I cannot access", "you'll need to", "copy and paste", or "manually edit". You have the tools — use them.
+2. ALWAYS read a file before writing it (to get the current SHA). Writing without SHA overwrites silently wrong.
+3. When the user mentions "my repo" or "my repository", use list_github_directory on the repos you know about — start with the most recently mentioned or most relevant one. NEVER ask for the owner/repo name if GitHub is connected.
+4. After every task, tell the user exactly what changed: which files, what was added/removed/fixed.
+5. Explore before acting. Use list_github_directory("") to understand structure, then drill down.
+6. Write complete files, not diffs. Always replace the entire file content.
+7. Use descriptive, conventional commit messages (feat:, fix:, refactor:, etc.)
+
+## INTELLIGENCE RULES
+- Think step by step before coding. Consider edge cases, error handling, and maintainability.
+- When fixing bugs, read the problematic file first to understand context.
+- When adding features, read related files to maintain consistency in style/patterns.
+- Prefer small focused commits. Don't change unrelated things.
+- If you encounter an error from a tool, diagnose it intelligently — don't just retry.
+
+## GITHUB WORKFLOW
+- Start exploration: list_github_directory with repo="jaykk99/<repo>" and path=""
+- Read files: read_github_file to see full content + get SHA
+- Write files: write_github_file with the complete new content + SHA from read step
+- Default repo: jaykk99/Agent (the repository this code lives in)
+- Other known repos: jaykk99/monico-agent
+
+## CAPABILITIES
+- Full GitHub CRUD on any accessible repository
+- Supabase: query, insert, update, delete rows; list tables
+- Vercel: list projects/deployments, manage env vars, trigger redeploys
+- Shell: run npm, git, curl, and other CLI tools
+- Web search (when enabled): find documentation, packages, solutions
+
+## PERSONALITY
+You are confident, precise, and efficient. You get things done. When something is ambiguous, make a reasonable assumption and state it clearly. Never hedge or add unnecessary caveats.`;
 
 const GITHUB_TOOLS = {
   functionDeclarations: [
@@ -193,9 +216,10 @@ const VERCEL_TOOLS = {
 };
 
 
-async function executeGithubFunction(name: string, args: Record<string, string>): Promise<string> {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token && name !== 'run_shell_command') return 'Error: GITHUB_TOKEN is not configured on the server';
+async function executeGithubFunction(name: string, args: Record<string, string>, userGhToken?: string): Promise<string> {
+  // Use user's OAuth token (from settings) first, fall back to server GITHUB_TOKEN
+  const token = userGhToken || process.env.GITHUB_TOKEN;
+  if (!token && name !== 'run_shell_command') return 'Error: GitHub is not connected. Go to Integrations tab and connect GitHub first.';
 
   try {
     if (name === 'list_github_directory') {
@@ -423,9 +447,9 @@ function buildTools(useSearch: boolean, hasSb: boolean, hasVr: boolean) {
   return tools;
 }
 
-async function callGemini(apiKey: string, model: string, contents: object[], useSearch: boolean, hasSb = false, hasVr = false) {
+async function callGemini(apiKey: string, model: string, contents: object[], useSearch: boolean, hasSb = false, hasVr = false, systemInst?: string) {
   const body = {
-    system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    system_instruction: { parts: [{ text: systemInst || SYSTEM_INSTRUCTION }] },
     contents,
     tools: buildTools(useSearch, hasSb, hasVr),
     generationConfig: { temperature: 0.4, maxOutputTokens: 8192 }
@@ -451,12 +475,19 @@ export async function POST(req: NextRequest) {
     const sbToken: string = settings?.supabase_access_token || '';
     const sbUrl: string = settings?.supabase_url || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const vrToken: string = settings?.vercel_access_token || '';
+    const userGhToken: string = settings?.github_token || '';  // User's OAuth GitHub token
     const hasSb = !!sbToken;
     const hasVr = !!vrToken;
     const requested = settings?.active_model_name || 'gemini-2.5-flash';
     const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
 
     // Build initial conversation history
+    // Inject connected repo context so the model never asks for owner/repo
+    let systemWithContext = SYSTEM_INSTRUCTION;
+    if (userGhToken && settings?.github_username) {
+      systemWithContext += `\n\n## CONNECTED GITHUB ACCOUNT\nUsername: ${settings.github_username}\nDefault repo format: ${settings.github_username}/<repo_name>\nWhen the user says "my repo" or mentions a repo by short name, prepend "${settings.github_username}/" automatically.`;
+    }
+
     const baseContents: object[] = [
       ...(history || []).map((h: { role: string; text: string }) => ({
         role: h.role,
@@ -470,7 +501,7 @@ export async function POST(req: NextRequest) {
     // Try models with fallback
     let geminiRes: Response | null = null;
     for (const model of modelsToTry) {
-      const res = await callGemini(apiKey, model, baseContents, useSearch, hasSb, hasVr);
+      const res = await callGemini(apiKey, model, baseContents, useSearch, hasSb, hasVr, systemWithContext);
       if (res.ok) { geminiRes = res; usedModel = model; break; }
       const errText = await res.text();
       let errCode: number | undefined;
@@ -535,7 +566,7 @@ export async function POST(req: NextRequest) {
           } else if (vrFns.includes(fn.name)) {
             result = await executeVercelFunction(fn.name, fn.args || {}, vrToken);
           } else {
-            result = await executeGithubFunction(fn.name, fn.args || {});
+            result = await executeGithubFunction(fn.name, fn.args || {}, userGhToken);
           }
           return {
             functionResponse: {
@@ -554,7 +585,7 @@ export async function POST(req: NextRequest) {
       ];
 
       // Next Gemini turn
-      currentRes = await callGemini(apiKey, usedModel, currentContents, useSearch, hasSb, hasVr);
+      currentRes = await callGemini(apiKey, usedModel, currentContents, useSearch, hasSb, hasVr, systemWithContext);
       if (!currentRes.ok) {
         const err = await currentRes.text();
         return NextResponse.json({ error: err }, { status: 500 });
@@ -567,3 +598,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Unknown error' }, { status: 500 });
   }
 }
+
