@@ -102,7 +102,7 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
   }
 }
 
-const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+const FALLBACK_MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
 const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, authenticated access to GitHub repositories, Supabase databases, and Vercel deployments. You think deeply, write production-quality code, and always complete tasks end-to-end without asking the user to do anything manually.
 
