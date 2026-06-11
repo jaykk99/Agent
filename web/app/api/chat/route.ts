@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { executeMcpFunction, MCP_MANAGEMENT_TOOLS } from '../mcp/route';
 
 const execAsync = promisify(exec);
 
@@ -440,7 +441,7 @@ async function executeVercelFunction(name: string, args: Record<string, string>,
 
 // Build Gemini-compatible tools array (search + function declarations can coexist)
 function buildTools(useSearch: boolean, hasSb: boolean, hasVr: boolean) {
-  const tools: object[] = [GITHUB_TOOLS];
+  const tools: object[] = [GITHUB_TOOLS, MCP_MANAGEMENT_TOOLS];  // MCP always enabled
   if (hasSb) tools.push(SUPABASE_TOOLS);
   if (hasVr) tools.push(VERCEL_TOOLS);
   if (useSearch) tools.push({ google_search: {} });
@@ -560,11 +561,14 @@ export async function POST(req: NextRequest) {
           const fn = p.functionCall!;
           const sbFns = ['list_supabase_tables','query_supabase','insert_supabase_row','update_supabase_rows','delete_supabase_rows'];
           const vrFns = ['list_vercel_projects','list_vercel_deployments','get_vercel_env_vars','add_vercel_env_var','trigger_vercel_redeploy'];
+          const mcpFns = ['mcp_list_servers','mcp_call_tool','mcp_fetch_url','mcp_remember','mcp_recall'];
           let result: string;
           if (sbFns.includes(fn.name)) {
             result = await executeSupabaseFunction(fn.name, fn.args || {}, sbToken, sbUrl);
           } else if (vrFns.includes(fn.name)) {
             result = await executeVercelFunction(fn.name, fn.args || {}, vrToken);
+          } else if (mcpFns.includes(fn.name)) {
+            result = await executeMcpFunction(fn.name, fn.args || {});
           } else {
             result = await executeGithubFunction(fn.name, fn.args || {}, userGhToken);
           }
