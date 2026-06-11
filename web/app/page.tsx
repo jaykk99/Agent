@@ -36,6 +36,7 @@ interface AppSettings {
   custom_model_endpoint: string;
   custom_model_api_key: string;
   custom_model_name: string;
+  hf_api_key: string;
   github_token: string;
   github_username: string;
   github_avatar_url: string;
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   is_custom_gemini_key_enabled: false, custom_gemini_api_key: '',
   active_model_name: 'gemini-2.5-pro', is_custom_model_enabled: false,
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
+  hf_api_key: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
   enable_web_search: false,
   supabase_access_token: '', supabase_username: '', is_supabase_connected: false,
@@ -65,6 +67,7 @@ const GEMINI_MODELS = [
   'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
   'gemini-2.0-flash',
+  'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
 ];
 
 type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
@@ -630,6 +633,19 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
                 <div key={key}>
                   <label className="text-xs text-gray-400 mb-1 block">{label}</label>
                   <input type={type} value={(local as unknown as Record<string, string>)[key]} onChange={e => setLocal(s => ({ ...s, [key]: e.target.value }))}
+
+          {/* HuggingFace API Token */}
+          <div className="mt-4 border-t border-zinc-700/50 pt-4">
+            <label className="text-xs text-gray-400 mb-1 block">HuggingFace API Token</label>
+            <input
+              type="password"
+              value={local.hf_api_key || ''}
+              onChange={e => setLocal(s => ({ ...s, hf_api_key: e.target.value }))}
+              placeholder="hf_..."
+              className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"
+            />
+            <p className="text-xs text-zinc-500 mt-1">Required for HuggingFace models (DavidAU Qwen3.6 40B, etc.)</p>
+          </div>
                     placeholder={ph} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
                 </div>
               ))}
