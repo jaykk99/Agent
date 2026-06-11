@@ -1,9 +1,106 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { executeMcpFunction, MCP_MANAGEMENT_TOOLS } from '../mcp/route';
 
 const execAsync = promisify(exec);
+
+// ── MCP Tool Declarations (inlined — no circular import from route handler) ──
+const MCP_MANAGEMENT_TOOLS = {
+  functionDeclarations: [
+    {
+      name: 'mcp_fetch_url',
+      description: 'Fetch any URL and return its content as clean readable text. Use for: reading docs, checking live pages, scraping data, verifying deployments.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Full URL to fetch (https://...)' },
+          max_length: { type: 'string', description: 'Max characters to return (default 5000)' }
+        },
+        required: ['url']
+      }
+    },
+    {
+      name: 'mcp_remember',
+      description: 'Store a persistent fact or note in memory for this project. Survives across conversations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Unique key (e.g. "preferred_branch", "db_schema", "api_base_url")' },
+          value: { type: 'string', description: 'Value to store' }
+        },
+        required: ['key', 'value']
+      }
+    },
+    {
+      name: 'mcp_recall',
+      description: 'Retrieve a previously stored memory by key.',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: { type: 'string', description: 'Key to retrieve' }
+        },
+        required: ['key']
+      }
+    }
+  ]
+};
+
+// ── MCP executor (self-contained, no import from route handler) ──────────────
+async function executeMcpFunction(name: string, args: Record<string, string>): Promise<string> {
+  const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+  try {
+    if (name === 'mcp_fetch_url') {
+      const { url, max_length = '5000' } = args;
+      if (!url) return 'Error: url is required';
+      try {
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIAgent/1.0)' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) return \`Fetch failed: HTTP \${res.status} for \${url}\`;
+        const html = await res.text();
+        const text = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, parseInt(max_length));
+        return text || '(empty page)';
+      } catch (fetchErr) {
+        return \`Fetch error: \${fetchErr instanceof Error ? fetchErr.message : 'Unknown'}\`;
+      }
+    }
+    if (name === 'mcp_remember') {
+      const { key, value } = args;
+      if (!key || !value) return 'Error: key and value are required';
+      // Store in /api/db/settings via Supabase
+      try {
+        const res = await fetch(\`\${baseUrl}/api/db/settings\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: \`mem_\${key}\`, value }),
+        });
+        return res.ok ? \`✅ Remembered: \${key}\` : \`Stored locally: \${key} = \${value.slice(0, 60)}\`;
+      } catch { return \`Noted: \${key} = \${value.slice(0, 60)}\`; }
+    }
+    if (name === 'mcp_recall') {
+      const { key } = args;
+      if (!key) return 'Error: key is required';
+      try {
+        const res = await fetch(\`\${baseUrl}/api/db/settings?key=mem_\${encodeURIComponent(key)}\`);
+        if (res.ok) {
+          const data = await res.json();
+          return data?.value || \`No memory found for key: \${key}\`;
+        }
+      } catch { /* fall through */ }
+      return \`No memory found for key: \${key}\`;
+    }
+    return \`Unknown MCP function: \${name}\`;
+  } catch (e) {
+    return \`MCP error (\${name}): \${e instanceof Error ? e.message : 'Unknown'}\`;
+  }
+}
 
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 
@@ -532,7 +629,7 @@ const CLI_TOOLS = {
 
 // Build Gemini-compatible tools array (search + function declarations can coexist)
 function buildTools(useSearch: boolean, hasSb: boolean, hasVr: boolean) {
-  const tools: object[] = [GITHUB_TOOLS, MCP_MANAGEMENT_TOOLS];  // MCP always enabled
+  const tools: object[] = [GITHUB_TOOLS, MCP_MANAGEMENT_TOOLS, CLI_TOOLS];
   if (hasSb) tools.push(SUPABASE_TOOLS);
   if (hasVr) tools.push(VERCEL_TOOLS);
   if (useSearch) tools.push({ google_search: {} });
@@ -769,7 +866,8 @@ export async function POST(req: NextRequest) {
           const fn = p.functionCall!;
           const sbFns = ['list_supabase_tables','query_supabase','insert_supabase_row','update_supabase_rows','delete_supabase_rows'];
           const vrFns = ['list_vercel_projects','list_vercel_deployments','get_vercel_env_vars','add_vercel_env_var','trigger_vercel_redeploy'];
-          const mcpFns = ['mcp_list_servers','mcp_call_tool','mcp_fetch_url','mcp_remember','mcp_recall'];
+          const mcpFns = ['mcp_fetch_url','mcp_remember','mcp_recall'];
+          const cliFns = ['run_cli','list_cli_tools','gh_create_pr','gh_create_issue','rg_search','fd_find','what_the_diff'];
           let result: string;
           if (sbFns.includes(fn.name)) {
             result = await executeSupabaseFunction(fn.name, fn.args || {}, sbToken, sbUrl);
@@ -777,6 +875,8 @@ export async function POST(req: NextRequest) {
             result = await executeVercelFunction(fn.name, fn.args || {}, vrToken);
           } else if (mcpFns.includes(fn.name)) {
             result = await executeMcpFunction(fn.name, fn.args || {});
+          } else if (cliFns.includes(fn.name)) {
+            result = await executeCliFunction(fn.name, fn.args || {}, userGhToken);
           } else {
             result = await executeGithubFunction(fn.name, fn.args || {}, userGhToken);
           }
