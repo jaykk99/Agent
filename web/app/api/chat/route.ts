@@ -438,6 +438,97 @@ async function executeVercelFunction(name: string, args: Record<string, string>,
   }
 }
 
+// ── CLI Tool Declarations ─────────────────────────────────────────────────────
+const CLI_TOOLS = {
+  functionDeclarations: [
+    {
+      name: 'run_cli',
+      description: "Run a headless CLI tool (gh, rg, fd, git, jq, node, vercel, supabase, curl, grep, ls, cat, diff) on the server. Use for: creating GitHub PRs/issues, searching code with ripgrep, file discovery with fd, JSON transforms with jq, git operations. Pass args as a JSON array string.",
+      parameters: {
+        type: 'object',
+        properties: {
+          tool: { type: 'string', description: "CLI binary: 'gh', 'rg', 'fd', 'git', 'jq', 'node', 'vercel', 'supabase', 'curl', 'ls', 'cat', 'grep', 'diff'" },
+          args: { type: 'string', description: 'JSON array of CLI arguments, e.g. ["pr","create","--title","feat: X","--repo","jaykk99/Agent"]' },
+          timeout: { type: 'string', description: 'Timeout ms (default 20000)' }
+        },
+        required: ['tool', 'args']
+      }
+    },
+    {
+      name: 'list_cli_tools',
+      description: 'List all CLI tools available on the server — which are installed vs missing with install hints.',
+      parameters: { type: 'object', properties: {}, required: [] }
+    },
+    {
+      name: 'gh_create_pr',
+      description: 'Create a structured GitHub Pull Request. Formats title, body, base branch automatically using gh CLI.',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'owner/repo e.g. jaykk99/Agent' },
+          title: { type: 'string', description: 'PR title (conventional commits: feat:, fix:, refactor:)' },
+          body: { type: 'string', description: 'PR body with ## What, ## Why, ## Changes, ## Testing sections' },
+          base: { type: 'string', description: 'Base branch (default: main)' },
+          head: { type: 'string', description: 'Head branch with changes' }
+        },
+        required: ['repo', 'title', 'body']
+      }
+    },
+    {
+      name: 'gh_create_issue',
+      description: 'Create a structured GitHub Issue (bug or feature). Formats body with proper sections and labels.',
+      parameters: {
+        type: 'object',
+        properties: {
+          repo: { type: 'string', description: 'owner/repo' },
+          title: { type: 'string', description: 'Issue title' },
+          body: { type: 'string', description: 'Issue body — bugs: Steps/Expected/Actual/Environment; features: Problem/Solution/Acceptance Criteria' },
+          labels: { type: 'string', description: 'Comma-separated labels e.g. "bug,priority:high"' }
+        },
+        required: ['repo', 'title', 'body']
+      }
+    },
+    {
+      name: 'rg_search',
+      description: 'Fast regex search across the codebase using ripgrep. Returns file:line matches. Use for: finding variable usages, locating TODOs, discovering function signatures, understanding patterns.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Regex pattern, e.g. "useState|useEffect" or "async function"' },
+          path: { type: 'string', description: 'Directory to search (default: .)' },
+          file_type: { type: 'string', description: 'File type filter: "ts", "tsx", "js", "py", "json"' },
+          context_lines: { type: 'string', description: 'Context lines around each match (default: 0)' }
+        },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'fd_find',
+      description: 'Find files by name or extension using fd (faster than find). Use for: locating config files, finding all files of a type, discovering project structure.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Filename pattern e.g. "route.ts" or a regex' },
+          path: { type: 'string', description: 'Directory to search in (default: .)' },
+          extension: { type: 'string', description: 'Extension filter e.g. "ts", "json", "md"' }
+        },
+        required: ['pattern']
+      }
+    },
+    {
+      name: 'what_the_diff',
+      description: 'Generate a natural-language explanation of a git diff or code change. Pass the diff output and get a plain-English structural summary of what changed and why it matters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          diff_text: { type: 'string', description: 'The git diff output or code comparison to explain' }
+        },
+        required: ['diff_text']
+      }
+    }
+  ]
+};
+
 
 // Build Gemini-compatible tools array (search + function declarations can coexist)
 function buildTools(useSearch: boolean, hasSb: boolean, hasVr: boolean) {
@@ -461,6 +552,123 @@ async function callGemini(apiKey: string, model: string, contents: object[], use
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   );
 }
+
+// ── CLI tool executor ─────────────────────────────────────────────────────────
+async function executeCliFunction(name: string, args: Record<string, string>, userGhToken?: string): Promise<string> {
+  const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
+  const ghToken = userGhToken || process.env.GITHUB_TOKEN || '';
+
+  try {
+    if (name === 'list_cli_tools') {
+      const res = await fetch(`${baseUrl}/api/cli`, { method: 'GET' });
+      if (!res.ok) return `Error listing CLI tools: ${res.status}`;
+      const data = await res.json();
+      const avail = (data.available || []).join(', ');
+      const miss  = (data.missing  || []).join(', ');
+      return `✅ Available: ${avail || 'none'}\n❌ Missing: ${miss || 'none'}`;
+    }
+
+    if (name === 'run_cli') {
+      const { tool, args: argsStr, timeout } = args;
+      let parsedArgs: string[] = [];
+      try { parsedArgs = JSON.parse(argsStr || '[]'); } catch { parsedArgs = (argsStr || '').split(' ').filter(Boolean); }
+      const res = await fetch(`${baseUrl}/api/cli`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool, args: parsedArgs, timeout: parseInt(timeout || '20000'), github_token: ghToken }),
+      });
+      const data = await res.json();
+      if (!res.ok) return `❌ ${data.error || 'CLI error'}${data.hint ? '\nHint: ' + data.hint : ''}`;
+      return data.output || data.stdout || '(no output)';
+    }
+
+    if (name === 'gh_create_pr') {
+      const { repo, title, body, base = 'main', head } = args;
+      const ghArgs = ['pr', 'create', '--repo', repo, '--title', title, '--body', body, '--base', base];
+      if (head) ghArgs.push('--head', head);
+      const res = await fetch(`${baseUrl}/api/cli`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'gh', args: ghArgs, github_token: ghToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return `❌ PR creation failed: ${data.output || data.error}\nHint: ${data.hint || 'Ensure gh is installed and GitHub token has repo scope'}`;
+      return `✅ PR created!\n${data.output}`;
+    }
+
+    if (name === 'gh_create_issue') {
+      const { repo, title, body, labels } = args;
+      const ghArgs = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
+      if (labels) ghArgs.push('--label', labels);
+      const res = await fetch(`${baseUrl}/api/cli`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'gh', args: ghArgs, github_token: ghToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) return `❌ Issue creation failed: ${data.output || data.error}`;
+      return `✅ Issue created!\n${data.output}`;
+    }
+
+    if (name === 'rg_search') {
+      const { pattern, path: searchPath = '.', file_type, context_lines = '0' } = args;
+      const rgArgs = [pattern, searchPath || '.', '--max-count', '50'];
+      if (file_type) rgArgs.push('--type', file_type);
+      const ctx = parseInt(context_lines || '0');
+      if (ctx > 0) rgArgs.push('-C', String(ctx));
+      rgArgs.push('--no-heading', '--line-number');
+      const res = await fetch(`${baseUrl}/api/cli`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'rg', args: rgArgs }),
+      });
+      const data = await res.json();
+      if (data.available === false) return `rg (ripgrep) not installed. ${data.hint}\n\nFallback: Use read_github_file to read specific files instead.`;
+      return data.output || data.stdout || 'No matches found';
+    }
+
+    if (name === 'fd_find') {
+      const { pattern, path: searchPath = '.', extension } = args;
+      const fdArgs = [pattern || '.'];
+      if (searchPath) fdArgs.push(searchPath);
+      if (extension) fdArgs.push('--extension', extension);
+      fdArgs.push('--max-results', '50');
+      const res = await fetch(`${baseUrl}/api/cli`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'fd', args: fdArgs }),
+      });
+      const data = await res.json();
+      if (data.available === false) {
+        // Fallback to find
+        const findRes = await fetch(`${baseUrl}/api/cli`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool: 'find', args: [searchPath || '.', '-name', `*${pattern}*`, '-type', 'f'] }),
+        });
+        const findData = await findRes.json();
+        return findData.output || 'No files found';
+      }
+      return data.output || data.stdout || 'No files found';
+    }
+
+    if (name === 'what_the_diff') {
+      const { diff_text } = args;
+      if (!diff_text) return 'No diff provided';
+      // Use Gemini itself to explain — return structured prompt result
+      const lines = diff_text.split('\n');
+      const added   = lines.filter(l => l.startsWith('+')).length;
+      const removed = lines.filter(l => l.startsWith('-')).length;
+      const files   = [...new Set(lines.filter(l => l.startsWith('+++') || l.startsWith('---')).map(l => l.replace(/^[+-]{3} [ab]?\/?/, '')))];
+      return `Diff Analysis:\n- Files changed: ${files.join(', ') || 'unknown'}\n- Lines added: ${added}\n- Lines removed: ${removed}\n\nFull diff passed to model for explanation:\n${diff_text.slice(0, 3000)}`;
+    }
+
+    return `Unknown CLI function: ${name}`;
+  } catch (e) {
+    return `CLI error (${name}): ${e instanceof Error ? e.message : 'Unknown error'}`;
+  }
+}
+
 
 export async function POST(req: NextRequest) {
   try {
