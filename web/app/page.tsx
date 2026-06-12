@@ -104,38 +104,45 @@ export default function Home() {
     if (!sessionId) return;
     fetchMessages();
     fetchConnectors();
-    fetchSettings();
     fetchServiceConns();
-    // Handle GitHub OAuth callback
+    // Handle OAuth callback — fetch settings first to avoid race condition
+    // where fetchSettings() might overwrite the just-saved OAuth token.
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get('error');
-    if (oauthError) {
-      setConnectError(`OAuth failed: ${oauthError}`);
-      window.history.replaceState({}, '', '/');
-      setTab('integrations');
-    }
-    const ghToken = params.get('gh_token');
-    const ghUser = params.get('gh_user');
+    const ghToken  = params.get('gh_token');
+    const ghUser   = params.get('gh_user');
     const ghAvatar = params.get('gh_avatar');
-    if (ghToken && ghUser) {
-      saveSettings({ ...settings, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true });
-      window.history.replaceState({}, '', '/');
-      setTab('integrations');
-    }
-    const sbToken = params.get('sb_token');
-    const sbUser  = params.get('sb_user');
-    if (sbToken && sbUser) {
-      saveSettings({ ...settings, supabase_access_token: sbToken, supabase_username: sbUser, is_supabase_connected: true });
-      window.history.replaceState({}, '', '/');
-      setTab('integrations');
-    }
-    const vrToken = params.get('vr_token');
-    const vrUser  = params.get('vr_user');
-    if (vrToken && vrUser) {
-      saveSettings({ ...settings, vercel_access_token: vrToken, vercel_username: vrUser, is_vercel_connected: true });
-      window.history.replaceState({}, '', '/');
-      setTab('integrations');
-    }
+    const sbToken  = params.get('sb_token');
+    const sbUser   = params.get('sb_user');
+    const vrToken  = params.get('vr_token');
+    const vrUser   = params.get('vr_user');
+    const hasOAuth = !!(oauthError || ghToken || sbToken || vrToken);
+    if (hasOAuth) window.history.replaceState({}, '', '/');
+    // Always fetch saved settings first, then merge any OAuth data on top
+    (async () => {
+      let current = settings;
+      try {
+        const data = await api(`/api/db/settings?session_id=${sessionId}`);
+        if (data) { current = data as AppSettings; setSettings(current); }
+      } catch { /* use defaults */ }
+      if (oauthError) {
+        setConnectError(`OAuth failed: ${oauthError}`);
+        setTab('integrations');
+        return;
+      }
+      let merged: AppSettings | null = null;
+      if (ghToken && ghUser) {
+        merged = { ...current, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true };
+        setTab('integrations');
+      } else if (sbToken && sbUser) {
+        merged = { ...current, supabase_access_token: sbToken, supabase_username: sbUser, is_supabase_connected: true };
+        setTab('integrations');
+      } else if (vrToken && vrUser) {
+        merged = { ...current, vercel_access_token: vrToken, vercel_username: vrUser, is_vercel_connected: true };
+        setTab('integrations');
+      }
+      if (merged) { setSettings(merged); await saveSettings(merged); }
+    })();
   }, [sessionId]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -572,7 +579,7 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
               className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
               {models.map(m => <option key={m}>{m}</option>)}
             </select>
-            <p className="text-xs text-gray-500 mt-1">gemini-2.5-flash — fastest · gemini-2.5-flash-lite — most efficient</p>
+            <p className="text-xs text-gray-500 mt-1">gh:gpt-4o · gh:meta-llama-3.3-70b-instruct · gemini-2.5-flash (all free, no API key)</p>
           </div>
           {!local.is_custom_gemini_key_enabled && (
             <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/40 rounded-lg px-3 py-2">

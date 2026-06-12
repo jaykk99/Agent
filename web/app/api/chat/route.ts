@@ -57,7 +57,7 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIAgent/1.0)' },
           signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) return `Fetch failed: HTTP ${res.status} for ${url}`;
+        if (!res.ok) return \`Fetch failed: HTTP \${res.status} for \${url}\`;
         const html = await res.text();
         const text = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -68,7 +68,7 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
           .slice(0, parseInt(max_length));
         return text || '(empty page)';
       } catch (fetchErr) {
-        return `Fetch error: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown'}`;
+        return \`Fetch error: \${fetchErr instanceof Error ? fetchErr.message : 'Unknown'}\`;
       }
     }
     if (name === 'mcp_remember') {
@@ -76,29 +76,29 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
       if (!key || !value) return 'Error: key and value are required';
       // Store in /api/db/settings via Supabase
       try {
-        const res = await fetch(`${baseUrl}/api/db/settings`, {
+        const res = await fetch(\`\${baseUrl}/api/db/settings\`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: `mem_${key}`, value }),
+          body: JSON.stringify({ key: \`mem_\${key}\`, value }),
         });
-        return res.ok ? `✅ Remembered: ${key}` : `Stored locally: ${key} = ${value.slice(0, 60)}`;
-      } catch { return `Noted: ${key} = ${value.slice(0, 60)}`; }
+        return res.ok ? \`✅ Remembered: \${key}\` : \`Stored locally: \${key} = \${value.slice(0, 60)}\`;
+      } catch { return \`Noted: \${key} = \${value.slice(0, 60)}\`; }
     }
     if (name === 'mcp_recall') {
       const { key } = args;
       if (!key) return 'Error: key is required';
       try {
-        const res = await fetch(`${baseUrl}/api/db/settings?key=mem_${encodeURIComponent(key)}`);
+        const res = await fetch(\`\${baseUrl}/api/db/settings?key=mem_\${encodeURIComponent(key)}\`);
         if (res.ok) {
           const data = await res.json();
-          return data?.value || `No memory found for key: ${key}`;
+          return data?.value || \`No memory found for key: \${key}\`;
         }
       } catch { /* fall through */ }
-      return `No memory found for key: ${key}`;
+      return \`No memory found for key: \${key}\`;
     }
-    return `Unknown MCP function: ${name}`;
+    return \`Unknown MCP function: \${name}\`;
   } catch (e) {
-    return `MCP error (${name}): ${e instanceof Error ? e.message : 'Unknown'}`;
+    return \`MCP error (\${name}): \${e instanceof Error ? e.message : 'Unknown'}\`;
   }
 }
 
@@ -109,6 +109,50 @@ const HF_MODELS: Record<string, string> = {
   'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking':
     'DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
 };
+
+
+// ── GitHub Models API (GPT-4o, Llama 3.3 70B, etc. — uses GitHub OAuth token, no extra key) ──
+const GITHUB_MODELS: Record<string, string> = {
+  'gh:gpt-4o':                        'gpt-4o',
+  'gh:gpt-4o-mini':                   'gpt-4o-mini',
+  'gh:llama-3.3-70b':                 'Meta-Llama-3.3-70B-Instruct',
+  'gh:llama-3.1-70b':                 'Meta-Llama-3.1-70B-Instruct',
+  'gh:mistral-large':                 'Mistral-large',
+  'gh:phi-4':                         'Phi-4',
+  'gh:deepseek-v3':                   'DeepSeek-V3',
+};
+
+async function callGitHubModels(
+  token: string,
+  model: string,
+  messages: {role: string; content: string}[],
+  systemPrompt: string,
+): Promise<string> {
+  const allMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages,
+  ];
+  const res = await fetch('https://models.inference.ai.azure.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: allMessages,
+      temperature: 0.7,
+      max_tokens: 4096,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`GitHub Models error (${res.status}): ${err.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || 'No response from model.';
+}
+
 
 async function callHuggingFace(
   hfToken: string,
@@ -809,7 +853,8 @@ export async function POST(req: NextRequest) {
       ? settings.custom_gemini_api_key
       : process.env.GEMINI_API_KEY;
 
-    if (!apiKey) return NextResponse.json({ error: 'No Gemini API key configured' }, { status: 400 });
+    // Allow proceeding without Gemini key — GitHub Models can be used via GitHub OAuth token
+    const noGemini = !apiKey;
 
     const useSearch = !!settings?.enable_web_search;
     const sbToken: string = settings?.supabase_access_token || '';
@@ -818,7 +863,7 @@ export async function POST(req: NextRequest) {
     const userGhToken: string = settings?.github_token || '';  // User's OAuth GitHub token
     const hasSb = !!sbToken;
     const hasVr = !!vrToken;
-    const requested = settings?.active_model_name || 'gemini-2.5-pro';
+    const requested = settings?.active_model_name || (noGemini ? 'gh:gpt-4o' : 'gemini-2.5-pro');
 
     // ── HuggingFace routing ─────────────────────────────────────────────────
     if (requested.startsWith('hf:')) {
@@ -839,14 +884,41 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
-
-    // Build initial conversation history
-    // Inject connected repo context so the model never asks for owner/repo
     let systemWithContext = SYSTEM_INSTRUCTION;
     if (userGhToken && settings?.github_username) {
       systemWithContext += `\n\n## CONNECTED GITHUB ACCOUNT\nUsername: ${settings.github_username}\nDefault repo format: ${settings.github_username}/<repo_name>\nWhen the user says "my repo" or mentions a repo by short name, prepend "${settings.github_username}/" automatically.`;
     }
+
+
+    // ── GitHub Models routing (gh:MODEL uses GitHub OAuth token, no API key) ─
+    if (requested.startsWith('gh:')) {
+      const ghModelId = GITHUB_MODELS[requested] ?? requested.slice(3);
+      const ghToken = userGhToken || process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || '';
+      if (!ghToken) {
+        return NextResponse.json({
+          error: 'Connect your GitHub account (Integrations tab) to use GitHub Models — GPT-4o, Llama 3.3 70B, and more for free.',
+        }, { status: 400 });
+      }
+      const ghMessages = (history || []).map((h: { role: string; text: string }) => ({
+        role: h.role === 'model' ? 'assistant' : h.role,
+        content: h.text,
+      }));
+      ghMessages.push({ role: 'user', content: message });
+      try {
+        const answer = await callGitHubModels(ghToken, ghModelId, ghMessages, systemWithContext);
+        return NextResponse.json({ response: answer, model: ghModelId });
+      } catch (e) {
+        return NextResponse.json({ error: e instanceof Error ? e.message : 'GitHub Models error' }, { status: 500 });
+      }
+    }
+
+    if (noGemini && !requested.startsWith('gh:') && !requested.startsWith('hf:')) {
+      return NextResponse.json({ error: 'Set a Gemini API key in Model Settings, or switch to a gh: model (free, uses GitHub login).' }, { status: 400 });
+    }
+    const modelsToTry = [requested, ...FALLBACK_MODELS.filter(m => m !== requested)];
+
+    // Build initial conversation history
+    // Inject connected repo context so the model never asks for owner/repo
 
     const baseContents: object[] = [
       ...(history || []).map((h: { role: string; text: string }) => ({
