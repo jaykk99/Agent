@@ -143,7 +143,19 @@ export default function Home() {
   /* ── API helpers ── */
   const api = useCallback(async (path: string, opts?: RequestInit) => {
     const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...opts?.headers } });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      const body = await res.text();
+      let msg = body;
+      try {
+        const j = JSON.parse(body);
+        msg = j?.error ?? j?.message ?? body;
+        // If msg is itself JSON, unwrap one more level
+        if (typeof msg === 'string' && msg.startsWith('{')) {
+          try { const j2 = JSON.parse(msg); msg = j2?.error?.message ?? j2?.message ?? msg; } catch { /* ok */ }
+        }
+      } catch { /* not JSON, use raw body */ }
+      throw new Error(msg);
+    }
     return res.json();
   }, []);
 
