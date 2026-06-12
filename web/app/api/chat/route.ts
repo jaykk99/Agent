@@ -57,7 +57,7 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; AIAgent/1.0)' },
           signal: AbortSignal.timeout(15000),
         });
-        if (!res.ok) return \`Fetch failed: HTTP \${res.status} for \${url}\`;
+        if (!res.ok) return `Fetch failed: HTTP ${res.status} for ${url}`;
         const html = await res.text();
         const text = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -68,7 +68,7 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
           .slice(0, parseInt(max_length));
         return text || '(empty page)';
       } catch (fetchErr) {
-        return \`Fetch error: \${fetchErr instanceof Error ? fetchErr.message : 'Unknown'}\`;
+        return `Fetch error: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown'}`;
       }
     }
     if (name === 'mcp_remember') {
@@ -76,29 +76,29 @@ async function executeMcpFunction(name: string, args: Record<string, string>): P
       if (!key || !value) return 'Error: key and value are required';
       // Store in /api/db/settings via Supabase
       try {
-        const res = await fetch(\`\${baseUrl}/api/db/settings\`, {
+        const res = await fetch(`${baseUrl}/api/db/settings`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: \`mem_\${key}\`, value }),
+          body: JSON.stringify({ key: `mem_${key}`, value }),
         });
-        return res.ok ? \`✅ Remembered: \${key}\` : \`Stored locally: \${key} = \${value.slice(0, 60)}\`;
-      } catch { return \`Noted: \${key} = \${value.slice(0, 60)}\`; }
+        return res.ok ? `✅ Remembered: ${key}` : `Stored locally: ${key} = ${value.slice(0, 60)}`;
+      } catch { return `Noted: ${key} = ${value.slice(0, 60)}`; }
     }
     if (name === 'mcp_recall') {
       const { key } = args;
       if (!key) return 'Error: key is required';
       try {
-        const res = await fetch(\`\${baseUrl}/api/db/settings?key=mem_\${encodeURIComponent(key)}\`);
+        const res = await fetch(`${baseUrl}/api/db/settings?key=mem_${encodeURIComponent(key)}`);
         if (res.ok) {
           const data = await res.json();
-          return data?.value || \`No memory found for key: \${key}\`;
+          return data?.value || `No memory found for key: ${key}`;
         }
       } catch { /* fall through */ }
-      return \`No memory found for key: \${key}\`;
+      return `No memory found for key: ${key}`;
     }
-    return \`Unknown MCP function: \${name}\`;
+    return `Unknown MCP function: ${name}`;
   } catch (e) {
-    return \`MCP error (\${name}): \${e instanceof Error ? e.message : 'Unknown'}\`;
+    return `MCP error (${name}): ${e instanceof Error ? e.message : 'Unknown'}`;
   }
 }
 
