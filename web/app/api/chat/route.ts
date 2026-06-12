@@ -106,6 +106,10 @@ const FALLBACK_MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash
 
 // ── HuggingFace model IDs (prefix "hf:" routes to HF Inference API) ─────────
 const HF_MODELS: Record<string, string> = {
+  'hf:Qwen/Qwen2.5-72B-Instruct':    'Qwen/Qwen2.5-72B-Instruct',
+  'hf:meta-llama/Llama-3.1-70B-Instruct': 'meta-llama/Llama-3.1-70B-Instruct',
+  'hf:mistralai/Mistral-7B-Instruct-v0.3': 'mistralai/Mistral-7B-Instruct-v0.3',
+  'hf:google/gemma-2-27b-it':        'google/gemma-2-27b-it',
   'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking':
     'DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
 };
@@ -155,7 +159,7 @@ async function callGitHubModels(
 
 
 async function callHuggingFace(
-  hfToken: string,
+  hfToken: string | null,
   modelId: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<string> {
@@ -164,7 +168,7 @@ async function callHuggingFace(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${hfToken}`,
+      ...(hfToken ? { Authorization: `Bearer ${hfToken}` } : {}),
     },
     body: JSON.stringify({
       model: modelId,
@@ -863,15 +867,13 @@ export async function POST(req: NextRequest) {
     const userGhToken: string = settings?.github_token || '';  // User's OAuth GitHub token
     const hasSb = !!sbToken;
     const hasVr = !!vrToken;
-    const requested = settings?.active_model_name || (noGemini ? 'gh:gpt-4o' : 'gemini-2.5-pro');
+    const requested = settings?.active_model_name || 'gh:gpt-4o';  // gh:gpt-4o is default — free via GitHub OAuth
 
     // ── HuggingFace routing ─────────────────────────────────────────────────
     if (requested.startsWith('hf:')) {
       const hfModelId = HF_MODELS[requested] ?? requested.slice(3);
-      const hfToken = settings?.hf_api_key || process.env.HF_TOKEN || '';
-      if (!hfToken) {
-        return NextResponse.json({ error: 'No HuggingFace API token configured. Add your HF token in Model Settings.' }, { status: 400 });
-      }
+      // Use user token > server env token > null (HF allows anonymous for many public models)
+      const hfToken = settings?.hf_api_key || process.env.HF_TOKEN || null;
       const hfMessages = [
         ...history.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content })),
         { role: 'user', content: message },
@@ -880,7 +882,11 @@ export async function POST(req: NextRequest) {
         const answer = await callHuggingFace(hfToken, hfModelId, hfMessages);
         return NextResponse.json({ response: answer, model: hfModelId });
       } catch (e) {
-        return NextResponse.json({ error: e instanceof Error ? e.message : 'HuggingFace error' }, { status: 500 });
+        const msg = e instanceof Error ? e.message : 'HuggingFace error';
+        const hint = msg.includes('401') || msg.includes('403')
+          ? `${msg}\n\nThis model requires authentication. Add your free HuggingFace token in Model Settings → HuggingFace API Token. Get one free at huggingface.co/settings/tokens`
+          : msg;
+        return NextResponse.json({ error: hint }, { status: 500 });
       }
     }
 

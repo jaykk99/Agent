@@ -62,11 +62,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   vercel_access_token: '', vercel_username: '', is_vercel_connected: false,
 };
 
+// All selectable models (grouped in the dropdown; this array is kept for legacy fallback uses)
 const GEMINI_MODELS = [
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.0-flash',
+  'gh:gpt-4o', 'gh:gpt-4o-mini', 'gh:llama-3.3-70b', 'gh:llama-3.1-70b',
+  'gh:mistral-large', 'gh:phi-4', 'gh:deepseek-v3',
+  'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash',
+  'hf:Qwen/Qwen2.5-72B-Instruct', 'hf:meta-llama/Llama-3.1-70B-Instruct',
+  'hf:mistralai/Mistral-7B-Instruct-v0.3', 'hf:google/gemma-2-27b-it',
   'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
 ];
 
@@ -577,9 +579,30 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
             <label className="text-xs text-gray-400 mb-1 block">Active Model</label>
             <select value={local.active_model_name} onChange={e => setLocal(s => ({ ...s, active_model_name: e.target.value }))}
               className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
-              {models.map(m => <option key={m}>{m}</option>)}
+              <optgroup label="── GitHub Models (free · uses GitHub login)">
+                <option value="gh:gpt-4o">GPT-4o ⭐ Recommended</option>
+                <option value="gh:gpt-4o-mini">GPT-4o Mini (faster)</option>
+                <option value="gh:llama-3.3-70b">Llama 3.3 70B (Meta)</option>
+                <option value="gh:llama-3.1-70b">Llama 3.1 70B (Meta)</option>
+                <option value="gh:mistral-large">Mistral Large</option>
+                <option value="gh:phi-4">Phi-4 (Microsoft)</option>
+                <option value="gh:deepseek-v3">DeepSeek V3</option>
+              </optgroup>
+              <optgroup label="── Gemini (add API key below)">
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              </optgroup>
+              <optgroup label="── HuggingFace (add HF token below)">
+                <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B Instruct</option>
+                <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B</option>
+                <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B Instruct</option>
+                <option value="hf:google/gemma-2-27b-it">Gemma 2 27B</option>
+                <option value="hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking">Qwen3.6 40B (DavidAU Uncensored)</option>
+              </optgroup>
             </select>
-            <p className="text-xs text-gray-500 mt-1">gh:gpt-4o · gh:meta-llama-3.3-70b-instruct · gemini-2.5-flash (all free, no API key)</p>
+            <p className="text-xs text-gray-500 mt-1">GitHub Models use your GitHub login — free. Connect GitHub in Integrations first.</p>
           </div>
           {!local.is_custom_gemini_key_enabled && (
             <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/40 rounded-lg px-3 py-2">
