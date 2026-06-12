@@ -62,7 +62,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   vercel_access_token: '', vercel_username: '', is_vercel_connected: false,
 };
 
-// All selectable models (grouped in the dropdown; this array is kept for legacy fallback uses)
 const GEMINI_MODELS = [
   'gh:gpt-4o', 'gh:gpt-4o-mini', 'gh:llama-3.3-70b', 'gh:llama-3.1-70b',
   'gh:mistral-large', 'gh:phi-4', 'gh:deepseek-v3',
@@ -107,31 +106,25 @@ export default function Home() {
     fetchMessages();
     fetchConnectors();
     fetchServiceConns();
-    // Handle OAuth callback — fetch settings first to avoid race condition
-    // where fetchSettings() might overwrite the just-saved OAuth token.
-    const params = new URLSearchParams(window.location.search);
-    const oauthError = params.get('error');
-    const ghToken  = params.get('gh_token');
-    const ghUser   = params.get('gh_user');
-    const ghAvatar = params.get('gh_avatar');
-    const sbToken  = params.get('sb_token');
-    const sbUser   = params.get('sb_user');
-    const vrToken  = params.get('vr_token');
-    const vrUser   = params.get('vr_user');
-    const hasOAuth = !!(oauthError || ghToken || sbToken || vrToken);
-    if (hasOAuth) window.history.replaceState({}, '', '/');
-    // Always fetch saved settings first, then merge any OAuth data on top
+    // Load settings from DB first, then merge any OAuth data — prevents race condition
+    // where fetchSettings() could overwrite a just-saved OAuth token.
     (async () => {
       let current = settings;
       try {
         const data = await api(`/api/db/settings?session_id=${sessionId}`);
         if (data) { current = data as AppSettings; setSettings(current); }
       } catch { /* use defaults */ }
-      if (oauthError) {
-        setConnectError(`OAuth failed: ${oauthError}`);
-        setTab('integrations');
-        return;
-      }
+      const params = new URLSearchParams(window.location.search);
+      const oauthError = params.get('error');
+      const ghToken  = params.get('gh_token');
+      const ghUser   = params.get('gh_user');
+      const ghAvatar = params.get('gh_avatar');
+      const sbToken  = params.get('sb_token');
+      const sbUser   = params.get('sb_user');
+      const vrToken  = params.get('vr_token');
+      const vrUser   = params.get('vr_user');
+      if (oauthError || ghToken || sbToken || vrToken) window.history.replaceState({}, '', '/');
+      if (oauthError) { setConnectError(`OAuth failed: ${oauthError}`); setTab('integrations'); return; }
       let merged: AppSettings | null = null;
       if (ghToken && ghUser) {
         merged = { ...current, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true };
@@ -579,7 +572,7 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
             <label className="text-xs text-gray-400 mb-1 block">Active Model</label>
             <select value={local.active_model_name} onChange={e => setLocal(s => ({ ...s, active_model_name: e.target.value }))}
               className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
-              <optgroup label="── GitHub Models (free · uses GitHub login)">
+              <optgroup label="── GitHub Models (free · connect GitHub first)">
                 <option value="gh:gpt-4o">GPT-4o ⭐ Recommended</option>
                 <option value="gh:gpt-4o-mini">GPT-4o Mini (faster)</option>
                 <option value="gh:llama-3.3-70b">Llama 3.3 70B (Meta)</option>
@@ -595,14 +588,14 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
                 <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
               </optgroup>
               <optgroup label="── HuggingFace (add HF token below)">
-                <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B Instruct</option>
+                <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option>
                 <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B</option>
-                <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B Instruct</option>
+                <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B</option>
                 <option value="hf:google/gemma-2-27b-it">Gemma 2 27B</option>
-                <option value="hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking">Qwen3.6 40B (DavidAU Uncensored)</option>
+                <option value="hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking">Qwen3.6 40B (DavidAU)</option>
               </optgroup>
             </select>
-            <p className="text-xs text-gray-500 mt-1">GitHub Models use your GitHub login — free. Connect GitHub in Integrations first.</p>
+            <p className="text-xs text-gray-500 mt-1">GitHub Models are free — just connect GitHub in Integrations first.</p>
           </div>
           {!local.is_custom_gemini_key_enabled && (
             <div className="flex items-center gap-2 bg-green-900/30 border border-green-700/40 rounded-lg px-3 py-2">
