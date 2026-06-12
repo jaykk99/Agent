@@ -633,22 +633,21 @@ function ModelSettingsTab({ settings, onSave, models }: { settings: AppSettings;
                 <div key={key}>
                   <label className="text-xs text-gray-400 mb-1 block">{label}</label>
                   <input type={type} value={(local as unknown as Record<string, string>)[key]} onChange={e => setLocal(s => ({ ...s, [key]: e.target.value }))}
-
-          {/* HuggingFace API Token */}
-          <div className="mt-4 border-t border-zinc-700/50 pt-4">
-            <label className="text-xs text-gray-400 mb-1 block">HuggingFace API Token</label>
-            <input
-              type="password"
-              value={local.hf_api_key || ''}
-              onChange={e => setLocal(s => ({ ...s, hf_api_key: e.target.value }))}
-              placeholder="hf_..."
-              className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"
-            />
-            <p className="text-xs text-zinc-500 mt-1">Required for HuggingFace models (DavidAU Qwen3.6 40B, etc.)</p>
-          </div>
                     placeholder={ph} className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
                 </div>
               ))}
+              {/* HuggingFace API Token */}
+              <div className="mt-4 border-t border-zinc-700/50 pt-4">
+                <label className="text-xs text-gray-400 mb-1 block">HuggingFace API Token</label>
+                <input
+                  type="password"
+                  value={local.hf_api_key || ''}
+                  onChange={e => setLocal(s => ({ ...s, hf_api_key: e.target.value }))}
+                  placeholder="hf_..."
+                  className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-zinc-500 mt-1">Required for HuggingFace models (DavidAU Qwen3.6 40B, etc.)</p>
+              </div>
             </>
           )}
         </div>
