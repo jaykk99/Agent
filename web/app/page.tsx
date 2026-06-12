@@ -106,8 +106,6 @@ export default function Home() {
     fetchMessages();
     fetchConnectors();
     fetchServiceConns();
-    // Load settings from DB first, then merge any OAuth data — prevents race condition
-    // where fetchSettings() could overwrite a just-saved OAuth token.
     (async () => {
       let current = settings;
       try {

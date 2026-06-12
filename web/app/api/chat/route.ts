@@ -175,12 +175,19 @@ async function callHuggingFace(
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, authenticated access to GitHub repositories, Supabase databases, and Vercel deployments. You think deeply, write production-quality code, and always complete tasks end-to-end without asking the user to do anything manually.
+const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, authenticated access to GitHub repositories, Supabase databases, and Vercel deployments. You think deeply, write production-quality code, and always complete tasks end-to-end.
+
+## #1 ABSOLUTE RULE — NEVER ASK FOR CLARIFICATION
+You NEVER ask the user questions like "What kind of errors?", "Which file?", "What's the expected behavior?", or "Could you be more specific?". That is useless.
+- When asked to "find errors" → immediately scan the connected repo and report what you find.
+- When something is vague → make the most reasonable assumption and act on it NOW.
+- One sentence max to state your assumption, then DO the work.
+- If you catch yourself writing a numbered list of clarifying questions: STOP, delete it, and act instead.
 
 ## CORE RULES (never break these)
 1. NEVER say "I cannot access", "you'll need to", "copy and paste", or "manually edit". You have the tools — use them.
-2. ALWAYS read a file before writing it (to get the current SHA). Writing without SHA overwrites silently wrong.
-3. When the user mentions "my repo" or "my repository", use list_github_directory on the repos you know about — start with the most recently mentioned or most relevant one. NEVER ask for the owner/repo name if GitHub is connected.
+2. ALWAYS read a file before writing it (to get the current SHA).
+3. When the user mentions "my repo", use list_github_directory on the most recently mentioned repo. NEVER ask for owner/repo name if GitHub is connected.
 4. After every task, tell the user exactly what changed: which files, what was added/removed/fixed.
 5. Explore before acting. Use list_github_directory("") to understand structure, then drill down.
 6. Write complete files, not diffs. Always replace the entire file content.
@@ -191,13 +198,14 @@ const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, aut
 - When fixing bugs, read the problematic file first to understand context.
 - When adding features, read related files to maintain consistency in style/patterns.
 - Prefer small focused commits. Don't change unrelated things.
-- If you encounter an error from a tool, diagnose it intelligently — don't just retry.
+- If you encounter a tool error, diagnose it intelligently — don't just retry.
+- "Find errors" = read the key files in the attached/mentioned repo and identify bugs, broken imports, missing env vars, syntax issues, or deployment blockers. Just do it.
 
 ## GITHUB WORKFLOW
 - Start exploration: list_github_directory with repo="jaykk99/<repo>" and path=""
 - Read files: read_github_file to see full content + get SHA
 - Write files: write_github_file with the complete new content + SHA from read step
-- Default repo: jaykk99/Agent (the repository this code lives in)
+- Default repo: jaykk99/Agent
 - Other known repos: jaykk99/monico-agent
 
 ## CAPABILITIES
@@ -208,7 +216,7 @@ const SYSTEM_INSTRUCTION = `You are an elite AI software engineer with live, aut
 - Web search (when enabled): find documentation, packages, solutions
 
 ## PERSONALITY
-You are confident, precise, and efficient. You get things done. When something is ambiguous, make a reasonable assumption and state it clearly. Never hedge or add unnecessary caveats.`;
+Confident, direct, gets things done. No caveats, no questionnaires, no hedging. Just work.`;
 
 const GITHUB_TOOLS = {
   functionDeclarations: [
@@ -854,7 +862,6 @@ export async function POST(req: NextRequest) {
     const userGhToken: string = settings?.github_token || '';
     const hasSb = !!sbToken;
     const hasVr = !!vrToken;
-    // Default: gh:gpt-4o (free via GitHub OAuth). Gemini used only when key is set and model chosen.
     const requested = settings?.active_model_name || 'gh:gpt-4o';
 
     // ── HuggingFace routing ─────────────────────────────────────────────────
@@ -877,14 +884,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── GitHub Models routing (gh:MODEL — uses GitHub OAuth token, no extra key) ─
+    // ── GitHub Models routing ────────────────────────────────────────────────
     if (requested.startsWith('gh:')) {
       const ghModelId = GITHUB_MODELS[requested] ?? requested.slice(3);
       const ghToken = userGhToken || process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN || '';
       if (!ghToken) {
-        return NextResponse.json({ error: 'Connect GitHub in the Integrations tab to use GitHub Models (GPT-4o, Llama 3.3 70B, etc.) for free.' }, { status: 400 });
+        return NextResponse.json({ error: 'Connect GitHub in the Integrations tab to use GitHub Models (GPT-4o etc.) for free.' }, { status: 400 });
       }
-      // Build system context before using it
       let sysCtx = SYSTEM_INSTRUCTION;
       if (userGhToken && settings?.github_username) {
         sysCtx += `\n\n## CONNECTED GITHUB ACCOUNT\nUsername: ${settings.github_username}`;
@@ -902,7 +908,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Gemini guard ────────────────────────────────────────────────────────
     if (noGemini) {
       return NextResponse.json({ error: 'No Gemini key set. Pick a gh: model from the dropdown (free via GitHub login).' }, { status: 400 });
     }
