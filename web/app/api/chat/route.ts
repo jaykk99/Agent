@@ -861,6 +861,61 @@ export async function POST(req: NextRequest) {
     // Default gh:gpt-4o — free via GitHub login, no extra key needed
     const requested = settings?.active_model_name || 'gh:gpt-4o';
 
+
+  // ── Auto API key / token detection ────────────────────────────────────────
+  // When the user pastes a token/key in chat, save it and confirm without calling AI.
+  const KEY_PATTERNS: { pattern: RegExp; field: string; label: string }[] = [
+    { pattern: /\bghp_[A-Za-z0-9]{36,}\b/, field: 'github_token',           label: 'GitHub token' },
+    { pattern: /\bghs_[A-Za-z0-9]{36,}\b/, field: 'github_token',           label: 'GitHub token' },
+    { pattern: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/, field: 'github_token',   label: 'GitHub token' },
+    { pattern: /\bvercel_[A-Za-z0-9]{20,}\b/, field: 'vercel_access_token', label: 'Vercel token' },
+    { pattern: /\bhf_[A-Za-z0-9]{20,}\b/,   field: 'hf_api_key',           label: 'HuggingFace token' },
+    { pattern: /\bAIza[A-Za-z0-9\-_]{35,}\b/, field: 'custom_gemini_api_key', label: 'Gemini API key' },
+    { pattern: /sk-[A-Za-z0-9]{32,}\b/,       field: 'openai_api_key',       label: 'OpenAI key' },
+  ];
+
+  let detectedKey: { field: string; value: string; label: string } | null = null;
+  for (const { pattern, field, label } of KEY_PATTERNS) {
+    const match = message.match(pattern);
+    if (match) { detectedKey = { field, value: match[0], label }; break; }
+  }
+
+  // Supabase URL detection (catches pasted project URLs)
+  const sbUrlMatch = message.match(/https:\/\/[a-z]{20}\.supabase\.co/);
+
+  if (detectedKey || sbUrlMatch) {
+    const updates: Record<string, string | boolean> = {};
+    let confirmed: string[] = [];
+
+    if (detectedKey) {
+      updates[detectedKey.field] = detectedKey.value;
+      if (detectedKey.field === 'custom_gemini_api_key') {
+        updates['is_custom_gemini_key_enabled'] = true;
+      }
+      if (detectedKey.field === 'github_token') {
+        updates['is_github_connected'] = true;
+      }
+      if (detectedKey.field === 'vercel_access_token') {
+        updates['is_vercel_connected'] = true;
+      }
+      confirmed.push(`${detectedKey.label} saved ✓`);
+    }
+    if (sbUrlMatch) {
+      updates['supabase_url'] = sbUrlMatch[0];
+      confirmed.push('Supabase URL saved ✓');
+    }
+
+    // Persist to DB
+    try {
+      const sb = getSupabase();
+      await sb.from('agent_settings').upsert({ session_id: sessionId, ...updates }, { onConflict: 'session_id' });
+    } catch { /* best-effort */ }
+
+    return NextResponse.json({
+      text: `Got it — ${confirmed.join(', ')}. Saved and ready to use. You can now use that integration.`,
+    });
+  }
+
     // ── HuggingFace routing ─────────────────────────────────────────────────
     if (requested.startsWith('hf:')) {
       const hfModelId = HF_MODELS[requested] ?? requested.slice(3);
