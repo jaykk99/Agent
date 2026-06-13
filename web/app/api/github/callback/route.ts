@@ -29,15 +29,29 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(`${baseUrl}/?error=no_token`);
     }
 
+    // Fetch profile
     const userRes = await fetch('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     });
     const user = await userRes.json();
 
+    // Fetch primary email (scope: user:email)
+    let email = user.email || '';
+    if (!email) {
+      try {
+        const emailRes = await fetch('https://api.github.com/user/emails', {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+        });
+        const emails: Array<{ email: string; primary: boolean }> = await emailRes.json();
+        email = emails.find(e => e.primary)?.email || emails[0]?.email || '';
+      } catch { /* ignore */ }
+    }
+
     const redirectUrl = new URL(baseUrl);
-    redirectUrl.searchParams.set('gh_token', token);
-    redirectUrl.searchParams.set('gh_user', user.login || '');
+    redirectUrl.searchParams.set('gh_token',  token);
+    redirectUrl.searchParams.set('gh_user',   user.login || '');
     redirectUrl.searchParams.set('gh_avatar', user.avatar_url || '');
+    redirectUrl.searchParams.set('gh_email',  email);
     return NextResponse.redirect(redirectUrl.toString());
   } catch (err) {
     console.error('GitHub OAuth callback failed:', err);
