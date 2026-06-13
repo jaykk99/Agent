@@ -122,6 +122,7 @@ export default function Home() {
       const ghToken  = params.get('gh_token');
       const ghUser   = params.get('gh_user');
       const ghAvatar = params.get('gh_avatar');
+      const ghEmail  = params.get('gh_email');
       const sbToken  = params.get('sb_token');
       const sbUser   = params.get('sb_user');
       const vrToken  = params.get('vr_token');
@@ -131,6 +132,8 @@ export default function Home() {
       let merged: AppSettings | null = null;
       if (ghToken && ghUser) {
         merged = { ...current, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true };
+        // Also treat GitHub connection as sign-in identity
+        if (ghUser) setSignedInUser({ email: ghEmail || '', name: ghUser, avatar: ghAvatar || '' });
         setTab('integrations');
       } else if (sbToken && sbUser) {
         merged = { ...current, supabase_access_token: sbToken, supabase_username: sbUser, is_supabase_connected: true };
@@ -141,28 +144,53 @@ export default function Home() {
       }
       if (merged) { setSettings(merged); await saveSettings(merged); }
 
-      // Handle Google / Supabase auth callback (?auth=google, tokens in hash)
-      const authParam = params.get('auth');
-      if (authParam === 'google') {
-        window.history.replaceState({}, '', '/');
-        const hash = new URLSearchParams(window.location.hash.replace('#', ''));
-        const accessToken = hash.get('access_token');
-        if (accessToken) {
-          try {
-            const userRes = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`, {
-              headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', Authorization: `Bearer ${accessToken}` },
-            });
-            const userData = await userRes.json();
-            const email = userData?.email || '';
-            const name  = userData?.user_metadata?.full_name || userData?.user_metadata?.name || email;
-            const avatar = userData?.user_metadata?.avatar_url || '';
-            if (email) {
-              const gMerged = { ...current, google_user_email: email, google_user_name: name, google_avatar_url: avatar, is_google_connected: true };
-              setSettings(gMerged);
-              await saveSettings(gMerged);
-            }
-          } catch { /* ignore */ }
+      // ── Supabase Auth: initialise browser client + handle callback tokens ──
+      const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (sbUrl && sbAnon) {
+        const { createClient } = await import('@supabase/supabase-js');
+        const sb = createClient(sbUrl, sbAnon);
+        // Restore any existing session
+        const { data: { session } } = await sb.auth.getSession();
+        if (session?.user) {
+          setSignedInUser({
+            email:  session.user.email || '',
+            name:   session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email || '',
+            avatar: session.user.user_metadata?.avatar_url || '',
+          });
+          const gMerged = {
+            ...current,
+            is_google_connected: true,
+            google_user_email: session.user.email || '',
+            google_user_name:  session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+            google_avatar_url: session.user.user_metadata?.avatar_url || '',
+          };
+          setSettings(gMerged);
+          await saveSettings(gMerged);
         }
+        // Listen for auth state changes (magic links, OAuth callbacks, sign-outs)
+        sb.auth.onAuthStateChange(async (_event, sess) => {
+          if (sess?.user) {
+            const u = sess.user;
+            setSignedInUser({
+              email:  u.email || '',
+              name:   u.user_metadata?.full_name || u.user_metadata?.name || u.email || '',
+              avatar: u.user_metadata?.avatar_url || '',
+            });
+            const saved = await loadSettings();
+            const gMerged = {
+              ...saved,
+              is_google_connected: true,
+              google_user_email: u.email || '',
+              google_user_name:  u.user_metadata?.full_name || u.user_metadata?.name || '',
+              google_avatar_url: u.user_metadata?.avatar_url || '',
+            };
+            setSettings(gMerged);
+            await saveSettings(gMerged);
+          } else {
+            setSignedInUser(null);
+          }
+        });
       }
     })();
   }, [sessionId]);
@@ -734,7 +762,11 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
 }) {
   const [newSvc, setNewSvc] = useState({ service_name: '', api_key: '' });
   const [loadingRepo, setLoadingRepo] = useState<string | null>(null);
-  const [connectError, setConnectError] = useState('');
+  const [connectError, setConnectError]   = useState('');
+  const [signedInUser, setSignedInUser]   = useState<{ email: string; name: string; avatar: string } | null>(null);
+  const [magicLinkEmail, setMagicLinkEmail] = useState('');
+  const [magicLinkSent, setMagicLinkSent]   = useState(false);
+  const [signInError, setSignInError]       = useState('');
 
   const PRESET_SERVICES = [
     { name: 'Railway', placeholder: 'API token (from railway.app/account/tokens)' },
@@ -750,7 +782,48 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
   const connectGitHub   = () => { window.location.href = '/api/github/auth'; };
   const connectSupabase = () => { window.location.href = '/api/supabase/auth'; };
   const connectVercel   = () => { window.location.href = '/api/vercel/auth'; };
-  const connectGoogle   = () => { window.location.href = '/api/auth/google'; };
+  const connectGoogle = async () => {
+    setSignInError('');
+    const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!sbUrl || !sbAnon) { setSignInError('Supabase not configured'); return; }
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(sbUrl, sbAnon);
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) setSignInError('Google not enabled yet — go to Supabase Dashboard → Auth → Providers → Google to enable it.');
+  };
+
+  const sendMagicLink = async () => {
+    if (!magicLinkEmail) return;
+    setSignInError(''); setMagicLinkSent(false);
+    const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!sbUrl || !sbAnon) { setSignInError('Supabase not configured'); return; }
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(sbUrl, sbAnon);
+    const { error } = await sb.auth.signInWithOtp({
+      email: magicLinkEmail,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) setSignInError(error.message);
+    else setMagicLinkSent(true);
+  };
+
+  const signOutUser = async () => {
+    const sbUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const sbAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!sbUrl || !sbAnon) return;
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(sbUrl, sbAnon);
+    await sb.auth.signOut();
+    setSignedInUser(null);
+    const cleared = { ...settings, is_google_connected: false, google_user_email: '', google_user_name: '', google_avatar_url: '' };
+    setSettings(cleared);
+    await saveSettings(cleared);
+  };
   const disconnectGitHub = () => {
     setConnectError('');
     onSaveSettings({ ...settings, github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false });
@@ -851,41 +924,72 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
 
 
 
-      {/* Google Sign-In */}
+      {/* Sign In */}
       <div>
-        <h2 className="font-semibold text-white mb-4">Google</h2>
+        <h2 className="font-semibold text-white mb-4">Sign In</h2>
         <div className="bg-gray-800 rounded-xl p-4">
-          {settings.is_google_connected ? (
+          {signedInUser ? (
             <>
               <div className="flex items-center gap-3 mb-3">
-                {settings.google_avatar_url ? (
-                  <img src={settings.google_avatar_url} alt="avatar" className="w-8 h-8 rounded-full"/>
+                {signedInUser.avatar ? (
+                  <img src={signedInUser.avatar} alt="avatar" className="w-9 h-9 rounded-full border border-gray-600"/>
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-white text-xs font-bold">G</div>
+                  <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-bold">
+                    {(signedInUser.name || signedInUser.email).charAt(0).toUpperCase()}
+                  </div>
                 )}
                 <div>
-                  <p className="text-sm font-medium text-white">{settings.google_user_name || settings.google_user_email}</p>
-                  <p className="text-xs text-gray-400">{settings.google_user_email}</p>
+                  <p className="text-sm font-medium text-white">{signedInUser.name || signedInUser.email}</p>
+                  <p className="text-xs text-gray-400">{signedInUser.email}</p>
                 </div>
-                <button onClick={() => onSaveSettings({ ...settings, is_google_connected: false, google_user_email: '', google_user_name: '', google_avatar_url: '' })}
-                  className="ml-auto text-gray-500 hover:text-red-400 p-1 transition-colors"><LogOut size={16}/></button>
+                <button onClick={signOutUser} className="ml-auto text-gray-500 hover:text-red-400 p-1 transition-colors" title="Sign out">
+                  <LogOut size={16}/>
+                </button>
               </div>
-              <p className="text-xs text-emerald-400 font-medium">✓ Signed in with Google</p>
+              <p className="text-xs text-emerald-400 font-medium">✓ Signed in</p>
             </>
           ) : (
-            <div className="text-center py-4">
-              <div className="w-8 h-8 rounded-full bg-blue-700 flex items-center justify-center text-white font-bold text-xs mx-auto mb-3">G</div>
-              <p className="text-sm text-gray-400 mb-3">Sign in with your Google account</p>
-              {connectError && connectError.toLowerCase().includes('google') && (
-                <div className="mb-3 bg-yellow-900/40 border border-yellow-700/50 rounded-lg px-3 py-2 text-xs text-yellow-300 text-left">
-                  <AlertCircle size={12} className="inline mr-1"/>Google not enabled in Supabase. Go to Supabase Dashboard → Auth → Providers → Google and enable it.
+            <div className="space-y-3">
+              {signInError && (
+                <div className="bg-yellow-900/40 border border-yellow-700/50 rounded-lg px-3 py-2 text-xs text-yellow-300">
+                  <AlertCircle size={12} className="inline mr-1"/>{signInError}
                 </div>
               )}
+              {/* Google Sign-In */}
               <button onClick={connectGoogle}
-                className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 mx-auto">
-                <svg className="w-4 h-4" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Sign in with Google
+                className="w-full bg-white hover:bg-gray-100 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 justify-center">
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Continue with Google
               </button>
+              {/* Email magic link */}
+              <div className="relative flex items-center gap-2 text-xs text-gray-500 my-1">
+                <div className="flex-1 h-px bg-gray-700"/><span>or</span><div className="flex-1 h-px bg-gray-700"/>
+              </div>
+              {magicLinkSent ? (
+                <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-lg px-3 py-3 text-xs text-emerald-300 text-center">
+                  ✉ Check your email — magic link sent to <strong>{magicLinkEmail}</strong>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={magicLinkEmail}
+                    onChange={e => setMagicLinkEmail(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendMagicLink()}
+                    placeholder="your@email.com"
+                    className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button onClick={sendMagicLink} disabled={!magicLinkEmail}
+                    className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+                    Send link
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
