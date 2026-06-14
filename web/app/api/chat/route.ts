@@ -367,6 +367,8 @@ const SYSTEM_INSTRUCTION = `You are an elite autonomous AI software engineer. Yo
 
 ## ABSOLUTE RULES
 
+0. **Never respond with just "Done." or a single-word answer** — always explain what you found, what you read, what you changed, and what the results were.
+
 1. **Never ask for clarification** — make the best reasonable assumption and act immediately.
    - "Fix errors in my repo" → scan the repo, find errors, fix them, push commits.
    - "Update the model" → read the config, update it, push.
@@ -432,11 +434,13 @@ const SYSTEM_INSTRUCTION = `You are an elite autonomous AI software engineer. Yo
 
 ## OUTPUT FORMAT
 
-- Be direct and action-oriented
-- Show what you did: "Read route.ts (847 lines) → found bug at line 392 → fixed circular import → pushed commit abc1234"
-- When writing code, briefly explain the key changes
-- Use code blocks for file paths and code snippets
-- Don't pad with filler — every sentence should be useful`;
+- **Always give a detailed response** — never respond with just "Done." or a single word
+- After using tools, report EVERYTHING you found: which files you read, what bugs exist, what you changed, what commits were pushed
+- Structure findings clearly: file names, line numbers, what's wrong, what you did about it
+- Show what you did: "Read \`route.ts\` (847 lines) → found circular import on line 3 → rewrote imports → pushed commit \`abc1234\`"
+- Use code blocks for code snippets and file paths
+- If asked to find bugs, list EVERY issue found — don't just say "looks good" without actually checking
+- Don't pad with filler — but also don't truncate real information`;
 
 // ── Gemini caller ─────────────────────────────────────────────────────────────
 function buildTools(hasSb: boolean, hasVr: boolean, useSearch: boolean): object[] {
@@ -1245,7 +1249,25 @@ export async function POST(req: NextRequest) {
       // No tool calls — terminal turn
       if (fnCalls.length === 0) {
         const textParts = parts.filter(p => p.text).map(p => p.text!);
-        let text = textParts.join('\n').trim() || 'Done.';
+        let text = textParts.join('\n').trim();
+
+        // If Gemini returned empty text after tool use, it means it finished without
+        // summarising. Force another turn asking it to explain what it found.
+        if (!text && turn > 0) {
+          currentContents = [
+            ...currentContents,
+            { role: 'model', parts },
+            { role: 'user', parts: [{ text: 'Summarise exactly what you found and what you did. Be specific — list files read, bugs found, changes made, commits pushed. Do not say "Done." — give the full report.' }] }
+          ];
+          currentRes = await callGemini(apiKey, usedModel, currentContents, hasSb, hasVr, useSearch, systemWithContext);
+          if (!currentRes.ok) {
+            return NextResponse.json({ error: 'Gemini error on summary turn' }, { status: 500 });
+          }
+          const summaryData = await currentRes.json();
+          const summaryParts = summaryData.candidates?.[0]?.content?.parts || [];
+          text = summaryParts.filter((p: {text?: string}) => p.text).map((p: {text?: string}) => p.text!).join('\n').trim();
+        }
+        if (!text) text = 'Task completed. Ask me what to do next.';
 
         if (usedModel !== requested) {
           text += `\n\n_(switched to ${usedModel} — ${requested} was unavailable)_`;
