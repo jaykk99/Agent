@@ -225,6 +225,8 @@ async function runGitHubModelsLoop(
   system: string, schemas: ToolSchema[],
   ghToken: string, sbToken: string, sbUrl: string, vrToken: string,
   toolLog: Array<{name:string;args:Record<string,string>;result:string}>
+,
+  ghUsername = ''
 ): Promise<string> {
   const msgs: typeof messages = [{ role:'system', content:system }, ...messages];
   const tools = buildOAITools(schemas);
@@ -271,7 +273,7 @@ async function dispatchTool(name: string, args: Record<string,string>, ghToken: 
   let result: string;
   try {
     switch (schema.category) {
-      case 'github':   result = await executeGithubTool(name, args, ghToken); break;
+      case 'github':   result = await executeGithubTool(name, args, ghToken, ghUsername); break;
       case 'mcp':      result = await executeMcpTool(name, args); break;
       case 'supabase': result = await executeSupabaseTool(name, args, sbToken, sbUrl); break;
       case 'vercel':   result = await executeVercelTool(name, args, vrToken); break;
