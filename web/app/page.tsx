@@ -410,7 +410,7 @@ export default function Home() {
     if (!settings.github_token) return;
     setGithubLoading(true);
     try {
-      const data = await api('/api/github/repos') as GitHubRepo[];
+      const data = await api(`/api/github/repos?token=${encodeURIComponent(settings.github_token)}`) as GitHubRepo[];
       if (Array.isArray(data)) setGithubRepos(data);
     } catch { /* ignore */ } finally { setGithubLoading(false); }
   }, [api, settings.github_token]);
@@ -455,10 +455,63 @@ export default function Home() {
 
       setThinkingStatus('Working…');
 
-      const resp = await api('/api/chat', {
+      // ── Streaming fetch with live tool-call status updates ──────────────
+      const chatRes = await fetch('/api/chat', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: messageWithContext, history, session_id: sessionId, settings }),
-      }) as { text?: string; error?: string; model?: string; detected_keys?: Array<{ field: string; value: string }> };
+      });
+
+      // Non-streaming path (catch redirect/error before reading body)
+      if (!chatRes.ok && chatRes.status !== 200) {
+        const errText = await chatRes.text();
+        let errMsg2 = errText;
+        try { errMsg2 = JSON.parse(errText)?.error ?? errText; } catch { /* ignore */ }
+        throw new Error(errMsg2);
+      }
+
+      const contentType = chatRes.headers.get('content-type') || '';
+      let resp: { text?: string; error?: string; model?: string; tool_calls?: ToolCallRecord[]; detected_keys?: Array<{ field: string; value: string }> };
+
+      if (contentType.includes('text/event-stream')) {
+        // ── SSE streaming path ──────────────────────────────────────────
+        const reader = chatRes.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const toolCallsAccum: ToolCallRecord[] = [];
+        let finalText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines2 = buffer.split('
+');
+          buffer = lines2.pop() || '';
+          for (const line of lines2) {
+            if (!line.startsWith('data:')) continue;
+            const raw = line.slice(5).trim();
+            if (raw === '[DONE]') break;
+            try {
+              const chunk = JSON.parse(raw);
+              if (chunk.type === 'tool_start') {
+                setThinkingStatus(`🔧 ${chunk.tool || chunk.name || 'tool'}…`);
+                toolCallsAccum.push({ name: chunk.tool || chunk.name, args: chunk.args || {}, result: '' });
+              } else if (chunk.type === 'tool_result') {
+                const last = toolCallsAccum[toolCallsAccum.length - 1];
+                if (last) last.result = chunk.result || '';
+                setThinkingStatus(`✓ ${chunk.tool || ''} — thinking…`);
+              } else if (chunk.type === 'done' || chunk.text) {
+                finalText = chunk.text || finalText;
+              }
+            } catch { /* ignore malformed chunk */ }
+          }
+        }
+        resp = { text: finalText, tool_calls: toolCallsAccum };
+      } else {
+        // ── Standard JSON path ─────────────────────────────────────────
+        resp = await chatRes.json();
+      }
 
       // Handle auto-detected keys
       if (resp.detected_keys?.length) {
@@ -478,6 +531,7 @@ export default function Home() {
         is_user: false,
         status: resp.error ? 'ERROR' : 'SUCCESS',
         model: resp.model,
+        tool_calls: resp.tool_calls || [],
       };
       setMessages(prev => [...prev, aiMsg]);
       await api('/api/db/messages', { method: 'POST', body: JSON.stringify({ session_id: sessionId, ...aiMsg }) }).catch(() => {});
