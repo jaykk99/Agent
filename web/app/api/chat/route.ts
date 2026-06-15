@@ -168,9 +168,16 @@ const HF_MODELS: Record<string,string> = {
   'hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking':'DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking',
 };
 const GITHUB_MODELS: Record<string,string> = {
-  'gh:gpt-4o':'gpt-4o','gh:gpt-4o-mini':'gpt-4o-mini',
-  'gh:llama-3.3-70b':'Meta-Llama-3.3-70B-Instruct','gh:llama-3.1-70b':'Meta-Llama-3.1-70B-Instruct',
-  'gh:mistral-large':'Mistral-large','gh:phi-4':'Phi-4','gh:deepseek-v3':'DeepSeek-V3',
+  'gh:gpt-4.1':        'gpt-4.1',
+  'gh:gpt-4.1-mini':   'gpt-4.1-mini',
+  'gh:gpt-4.1-nano':   'gpt-4.1-nano',
+  'gh:gpt-4o':         'gpt-4o',
+  'gh:gpt-4o-mini':    'gpt-4o-mini',
+  'gh:llama-3.3-70b':  'Meta-Llama-3.3-70B-Instruct',
+  'gh:llama-3.1-70b':  'Meta-Llama-3.1-70B-Instruct',
+  'gh:mistral-large':  'Mistral-large',
+  'gh:phi-4':          'Phi-4',
+  'gh:deepseek-v3':    'DeepSeek-V3',
 };
 
 // ── Key auto-detect patterns ───────────────────────────────────────────────────
@@ -279,15 +286,23 @@ async function dispatchTool(name: string, args: Record<string,string>, ghToken: 
 }
 
 // ── GitHub Tools ──────────────────────────────────────────────────────────────
-async function executeGithubTool(name: string, args: Record<string,string>, userGhToken?: string): Promise<string> {
+
+/** Auto-prepend username when repo has no owner (e.g. "monico-agent" → "jaykk99/monico-agent") */
+function normalizeRepo(repo: string, username: string): string {
+  if (!repo || repo.includes('/')) return repo;
+  return username ? `${username}/${repo}` : repo;
+}
+
+async function executeGithubTool(name: string, args: Record<string,string>, userGhToken?: string, ghUsername?: string): Promise<string> {
   const token = userGhToken || process.env.GITHUB_TOKEN;
   if (!token) return 'Error: GitHub not connected. Go to the Connect tab and link your GitHub account.';
 
   const gh = { Authorization:`Bearer ${token}`, Accept:'application/vnd.github.v3+json', 'User-Agent':'AIAgent/1.0', 'Content-Type':'application/json' };
   const t = <T>(p: Promise<T>) => Promise.race([p, new Promise<T>((_,r)=>setTimeout(()=>r(new Error('GitHub API timeout')), TOOL_TIMEOUT_MS))]);
+  const uname = ghUsername || '';
 
   if (name === 'list_github_directory') {
-    const { repo, path='' } = args;
+    const repo = normalizeRepo(args.repo, uname); const path = args.path || '';
     const res = await t(fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers:gh }));
     if (!(res as Response).ok) { const e=await (res as Response).json().catch(()=>({})) as {message?:string}; return `Error: ${e.message||(res as Response).statusText} (${(res as Response).status})`; }
     const data = await (res as Response).json();
@@ -299,7 +314,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'read_github_file') {
-    const { repo, path, ref } = args;
+    const repo = normalizeRepo(args.repo, uname); const { path, ref } = args;
     const res = await t(fetch(`https://api.github.com/repos/${repo}/contents/${path}${ref?`?ref=${ref}`:''}`, { headers:gh }));
     if (!(res as Response).ok) { const e=await (res as Response).json().catch(()=>({})) as {message?:string}; return `Error reading ${path}: ${e.message||(res as Response).statusText} (${(res as Response).status})`; }
     const data = await (res as Response).json();
@@ -311,7 +326,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'write_github_file') {
-    const { repo, path, content, message, sha, branch } = args;
+    const repo = normalizeRepo(args.repo, uname); const { path, content, message, sha, branch } = args;
     const body: Record<string,string> = { message, content:Buffer.from(content,'utf-8').toString('base64') };
     if (sha) body.sha = sha;
     if (branch) body.branch = branch;
@@ -326,7 +341,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'delete_github_file') {
-    const { repo, path, sha, message, branch } = args;
+    const repo = normalizeRepo(args.repo, uname); const { path, sha, message, branch } = args;
     const body: Record<string,string> = { message, sha };
     if (branch) body.branch = branch;
     const res = await t(fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { method:'DELETE', headers:gh, body:JSON.stringify(body) }));
@@ -344,7 +359,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'create_github_pr') {
-    const { repo, title, body:prBody, head, base='main' } = args;
+    const repo = normalizeRepo(args.repo, uname); const { title, body:prBody, head, base='main' } = args;
     const res = await t(fetch(`https://api.github.com/repos/${repo}/pulls`, { method:'POST', headers:gh, body:JSON.stringify({title,body:prBody,head,base}) }));
     if (!(res as Response).ok) { const e=await (res as Response).json().catch(()=>({})) as {message?:string}; return `Error: ${e.message||(res as Response).statusText}`; }
     const data = await (res as Response).json();
@@ -352,7 +367,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'create_github_issue') {
-    const { repo, title, body:issueBody, labels } = args;
+    const repo = normalizeRepo(args.repo, uname); const { title, body:issueBody, labels } = args;
     const payload: Record<string,unknown> = { title, body:issueBody };
     if (labels) payload.labels = labels.split(',').map(l=>l.trim());
     const res = await t(fetch(`https://api.github.com/repos/${repo}/issues`, { method:'POST', headers:gh, body:JSON.stringify(payload) }));
@@ -372,7 +387,7 @@ async function executeGithubTool(name: string, args: Record<string,string>, user
   }
 
   if (name === 'get_github_diff') {
-    const { repo, sha, base, head } = args;
+    const repo = normalizeRepo(args.repo, uname); const { sha, base, head } = args;
     const url = sha ? `https://api.github.com/repos/${repo}/commits/${sha}` : `https://api.github.com/repos/${repo}/compare/${base}...${head}`;
     const res = await t(fetch(url, { headers:{...gh,Accept:'application/vnd.github.v3.diff'} }));
     if (!(res as Response).ok) return `Error: ${(res as Response).statusText}`;
@@ -531,14 +546,34 @@ export async function POST(req: NextRequest) {
     const hasSb = !!(sbToken && sbUrl);
     const hasVr = !!vrToken;
     const hasGh = !!userGhToken;
-    const requested = settings?.active_model_name || 'gemini-2.5-flash';
+    // Smart default: gpt-4.1 when GitHub is connected (fast & capable), else Gemini
+    const requested = settings?.active_model_name || (hasGh ? 'gh:gpt-4.1' : 'gemini-2.5-flash');
 
     // Dynamic tool selection (token conservation)
     const activeSchemas = selectActiveTools(message, hasGh, hasSb, hasVr);
 
     // Build contextual system prompt
     let systemCtx = SYSTEM_PROMPT;
-    if (hasGh && settings?.github_username) systemCtx += `\n\n## CONNECTED GITHUB\nUsername: ${settings.github_username}\nWhen user says "my repo" or omits owner, use ${settings.github_username}.`;
+    const ghUsername = (settings?.github_username || '') as string;
+    if (hasGh && ghUsername) {
+      // Fetch the user's repos for context (top 25 most recently pushed)
+      let repoCtx = '';
+      try {
+        const reposRes = await fetch('https://api.github.com/user/repos?per_page=25&sort=pushed&affiliation=owner,collaborator', {
+          headers: { Authorization: `Bearer ${userGhToken}`, Accept: 'application/vnd.github+json' },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (reposRes.ok) {
+          const repos = await reposRes.json() as Array<{ full_name: string; description: string | null; language: string | null }>;
+          repoCtx = '\nRepos (most recent first):\n' + repos.map(r =>
+            `  • ${r.full_name}${r.language ? ` [${r.language}]` : ''}${r.description ? ` — ${r.description.slice(0, 70)}` : ''}`
+          ).join('\n');
+        }
+      } catch { /* ignore, non-fatal */ }
+      systemCtx += `\n\n## CONNECTED GITHUB\nUsername: ${ghUsername}\n` +
+        `CRITICAL: When a repo name has no owner prefix, ALWAYS prepend ${ghUsername}/ automatically — NEVER ask the user. ` +
+        `E.g. "monico-agent" → "${ghUsername}/monico-agent".${repoCtx}`;
+    }
     if (hasSb) systemCtx += `\n\n## CONNECTED SUPABASE\nURL: ${sbUrl}`;
     if (hasVr) systemCtx += `\n\n## CONNECTED VERCEL\nToken available.`;
     // Google sign-in context
@@ -580,7 +615,7 @@ export async function POST(req: NextRequest) {
         {role:'user',content:message},
       ];
       try {
-        const answer = await runGitHubModelsLoop(ghToken, ghModelId, ghMsgs, systemCtx, activeSchemas, userGhToken, sbToken, sbUrl, vrToken, _toolCallLog);
+        const answer = await runGitHubModelsLoop(ghToken, ghModelId, ghMsgs, systemCtx, activeSchemas, userGhToken, sbToken, sbUrl, vrToken, _toolCallLog, ghUsername);
         return NextResponse.json({ text:answer, model:ghModelId, tool_calls:_toolCallLog });
       } catch (e) {
         return NextResponse.json({ error:e instanceof Error?e.message:'GitHub Models error' }, { status:500 });
@@ -616,7 +651,7 @@ export async function POST(req: NextRequest) {
           {role:'user',content:message},
         ];
         try {
-          const answer = await runGitHubModelsLoop(ghFallback,'gpt-4o',ghMsgs,systemCtx,activeSchemas,userGhToken,sbToken,sbUrl,vrToken,_toolCallLog);
+          const answer = await runGitHubModelsLoop(ghFallback,'gpt-4o',ghMsgs,systemCtx,activeSchemas,userGhToken,sbToken,sbUrl,vrToken,_toolCallLog,ghUsername);
           return NextResponse.json({ text:answer, model:'gpt-4o (auto-fallback)' });
         } catch { /* fall through */ }
       }
