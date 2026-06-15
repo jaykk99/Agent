@@ -879,8 +879,11 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
             <select value={local.active_model_name} onChange={e => setLocal(s => ({ ...s, active_model_name: e.target.value }))}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
               <optgroup label="── GitHub Models (free · connect GitHub first)">
-                <option value="gh:gpt-4o">⭐ GPT-4o — Recommended (free)</option>
-                <option value="gh:gpt-4o-mini">GPT-4o Mini (faster, free)</option>
+                <option value="gh:gpt-4.1">🔥 GPT-4.1 — Smartest (free)</option>
+                <option value="gh:gpt-4.1-mini">GPT-4.1 Mini — Fast &amp; Smart (free)</option>
+                <option value="gh:gpt-4.1-nano">GPT-4.1 Nano — Fastest (free)</option>
+                <option value="gh:gpt-4o">GPT-4o (free)</option>
+                <option value="gh:gpt-4o-mini">GPT-4o Mini (free)</option>
                 <option value="gh:llama-3.3-70b">Llama 3.3 70B (Meta, free)</option>
                 <option value="gh:llama-3.1-70b">Llama 3.1 70B (Meta, free)</option>
                 <option value="gh:mistral-large">Mistral Large (free)</option>
