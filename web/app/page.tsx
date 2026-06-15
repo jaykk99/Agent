@@ -1123,6 +1123,11 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
           ) : (
             <div className="space-y-2">
               <p className="text-xs text-gray-400 mb-2">Connect to query tables, insert data, and manage your Supabase database from chat.</p>
+              <p className="text-xs text-gray-500 mb-2">
+                Must register this callback URL in your{' '}
+                <a href="https://supabase.com/dashboard/account/oauth/apps" target="_blank" className="text-blue-400 underline">Supabase OAuth App</a>:{' '}
+                <code className="bg-gray-900 px-1 rounded text-gray-300 break-all">https://api-ai-agent.vercel.app/api/supabase/callback</code>
+              </p>
               <button onClick={connectSupabase}
                 className="w-full flex items-center justify-center gap-2 bg-green-900/30 hover:bg-green-900/50 border border-green-700/40 rounded-xl py-2.5 text-sm font-medium text-green-300 transition-colors">
                 <Database size={14}/>Connect Supabase
@@ -1147,6 +1152,11 @@ function IntegrationsTab({ settings, githubRepos, githubLoading, serviceConns, s
           ) : (
             <div>
               <p className="text-xs text-gray-400 mb-2">Connect to list projects, manage env vars, and trigger deployments from chat.</p>
+              <p className="text-xs text-gray-500 mb-2">
+                Must register this callback URL in your{' '}
+                <a href="https://vercel.com/account/oauth" target="_blank" className="text-blue-400 underline">Vercel OAuth App</a>:{' '}
+                <code className="bg-gray-900 px-1 rounded text-gray-300 break-all">https://api-ai-agent.vercel.app/api/vercel/callback</code>
+              </p>
               <button onClick={connectVercel}
                 className="w-full flex items-center justify-center gap-2 bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700/40 rounded-xl py-2.5 text-sm font-medium text-blue-300 transition-colors">
                 <Cloud size={14}/>Connect Vercel
