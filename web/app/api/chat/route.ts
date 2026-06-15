@@ -541,6 +541,12 @@ export async function POST(req: NextRequest) {
     if (hasGh && settings?.github_username) systemCtx += `\n\n## CONNECTED GITHUB\nUsername: ${settings.github_username}\nWhen user says "my repo" or omits owner, use ${settings.github_username}.`;
     if (hasSb) systemCtx += `\n\n## CONNECTED SUPABASE\nURL: ${sbUrl}`;
     if (hasVr) systemCtx += `\n\n## CONNECTED VERCEL\nToken available.`;
+    // Google sign-in context
+    const googleName  = (settings?.google_user_name  || '') as string;
+    const googleEmail = (settings?.google_user_email || '') as string;
+    if (settings?.is_google_connected && (googleName || googleEmail)) {
+      systemCtx += `\n\n## SIGNED-IN USER\nName: ${googleName}\nEmail: ${googleEmail}`;
+    }
 
     const baseContents = [
       ...(history||[]).map((h:{role:string;text:string})=>({ role:h.role==='assistant'?'model':h.role, parts:[{text:h.text}] })),
