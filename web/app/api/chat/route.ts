@@ -30,6 +30,7 @@ const SUMMARY_PROMPT  = 'Summarise EVERYTHING you found and did: every file read
 // ── In-process memory ─────────────────────────────────────────────────────────
 const _agentMemory: Record<string, string> = {};
 let _estimatedTokens = 0;
+let _toolCallLog: Array<{name: string; args: Record<string,string>; result: string}> = [];
 
 // ── Tool Schema Registry (runtime validation) ─────────────────────────────────
 interface ToolSchema {
@@ -260,18 +261,21 @@ async function runGitHubModelsLoop(
 async function dispatchTool(name: string, args: Record<string,string>, ghToken: string, sbToken: string, sbUrl: string, vrToken: string): Promise<string> {
   const schema = TOOL_REGISTRY.find(s => s.name === name);
   if (!schema) return `Unknown tool: ${name}`;
+  let result: string;
   try {
     switch (schema.category) {
-      case 'github':   return await executeGithubTool(name, args, ghToken);
-      case 'mcp':      return await executeMcpTool(name, args);
-      case 'supabase': return await executeSupabaseTool(name, args, sbToken, sbUrl);
-      case 'vercel':   return await executeVercelTool(name, args, vrToken);
-      case 'cli':      return await executeCliTool(name, args);
-      default:         return `No executor for: ${schema.category}`;
+      case 'github':   result = await executeGithubTool(name, args, ghToken); break;
+      case 'mcp':      result = await executeMcpTool(name, args); break;
+      case 'supabase': result = await executeSupabaseTool(name, args, sbToken, sbUrl); break;
+      case 'vercel':   result = await executeVercelTool(name, args, vrToken); break;
+      case 'cli':      result = await executeCliTool(name, args); break;
+      default:         result = `No executor for: ${schema.category}`; break;
     }
   } catch (e) {
-    return `Error in ${name}: ${e instanceof Error ? e.message : 'Unknown error'}`;
+    result = `Error in ${name}: ${e instanceof Error ? e.message : 'Unknown error'}`;
   }
+  _toolCallLog.push({ name, args, result: result.slice(0, 500) });
+  return result;
 }
 
 // ── GitHub Tools ──────────────────────────────────────────────────────────────
@@ -571,7 +575,7 @@ export async function POST(req: NextRequest) {
       ];
       try {
         const answer = await runGitHubModelsLoop(ghToken, ghModelId, ghMsgs, systemCtx, activeSchemas, userGhToken, sbToken, sbUrl, vrToken);
-        return NextResponse.json({ text:answer, model:ghModelId });
+        return NextResponse.json({ text:answer, model:ghModelId, tool_calls:_toolCallLog });
       } catch (e) {
         return NextResponse.json({ error:e instanceof Error?e.message:'GitHub Models error' }, { status:500 });
       }
@@ -617,11 +621,12 @@ export async function POST(req: NextRequest) {
     let currentContents = [...baseContents];
     let currentRes = geminiRes;
     _estimatedTokens = 0;
+    _toolCallLog = [];
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       // Token budget circuit breaker
       if (_estimatedTokens > MAX_COST_TOKENS) {
-        return NextResponse.json({ text:`⚠️ Token budget reached (~${(_estimatedTokens/1000).toFixed(0)}k tokens). Here's what I found — ask me to continue on specific files.` });
+        return NextResponse.json({ text:`⚠️ Token budget reached (~${(_estimatedTokens/1000).toFixed(0)}k tokens). Here's what I found — ask me to continue on specific files.`, tool_calls:_toolCallLog });
       }
 
       const geminiData = await currentRes.json();
@@ -655,7 +660,7 @@ export async function POST(req: NextRequest) {
           if (sources) text += `\n\n🔍 Sources: ${sources}`;
         }
 
-        return NextResponse.json({ text });
+        return NextResponse.json({ text, tool_calls: _toolCallLog });
       }
 
       // Execute tool calls (parallel, with validation)
