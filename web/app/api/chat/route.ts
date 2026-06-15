@@ -30,7 +30,6 @@ const SUMMARY_PROMPT  = 'Summarise EVERYTHING you found and did: every file read
 // ── In-process memory ─────────────────────────────────────────────────────────
 const _agentMemory: Record<string, string> = {};
 let _estimatedTokens = 0;
-let _toolCallLog: Array<{name: string; args: Record<string,string>; result: string}> = [];
 
 // ── Tool Schema Registry (runtime validation) ─────────────────────────────────
 interface ToolSchema {
@@ -217,7 +216,8 @@ async function runGitHubModelsLoop(
   token: string, model: string,
   messages: Array<{role:string;content:string|null;tool_calls?:unknown[];tool_call_id?:string;name?:string}>,
   system: string, schemas: ToolSchema[],
-  ghToken: string, sbToken: string, sbUrl: string, vrToken: string
+  ghToken: string, sbToken: string, sbUrl: string, vrToken: string,
+  toolLog: Array<{name:string;args:Record<string,string>;result:string}>
 ): Promise<string> {
   const msgs: typeof messages = [{ role:'system', content:system }, ...messages];
   const tools = buildOAITools(schemas);
@@ -258,7 +258,7 @@ async function runGitHubModelsLoop(
 }
 
 // ── Central tool dispatcher ────────────────────────────────────────────────────
-async function dispatchTool(name: string, args: Record<string,string>, ghToken: string, sbToken: string, sbUrl: string, vrToken: string): Promise<string> {
+async function dispatchTool(name: string, args: Record<string,string>, ghToken: string, sbToken: string, sbUrl: string, vrToken: string, toolLog: Array<{name:string;args:Record<string,string>;result:string}>): Promise<string> {
   const schema = TOOL_REGISTRY.find(s => s.name === name);
   if (!schema) return `Unknown tool: ${name}`;
   let result: string;
@@ -274,7 +274,7 @@ async function dispatchTool(name: string, args: Record<string,string>, ghToken: 
   } catch (e) {
     result = `Error in ${name}: ${e instanceof Error ? e.message : 'Unknown error'}`;
   }
-  _toolCallLog.push({ name, args, result: result.slice(0, 500) });
+  toolLog.push({ name, args, result: result.slice(0, 500) });
   return result;
 }
 
@@ -574,7 +574,7 @@ export async function POST(req: NextRequest) {
         {role:'user',content:message},
       ];
       try {
-        const answer = await runGitHubModelsLoop(ghToken, ghModelId, ghMsgs, systemCtx, activeSchemas, userGhToken, sbToken, sbUrl, vrToken);
+        const answer = await runGitHubModelsLoop(ghToken, ghModelId, ghMsgs, systemCtx, activeSchemas, userGhToken, sbToken, sbUrl, vrToken, _toolCallLog);
         return NextResponse.json({ text:answer, model:ghModelId, tool_calls:_toolCallLog });
       } catch (e) {
         return NextResponse.json({ error:e instanceof Error?e.message:'GitHub Models error' }, { status:500 });
@@ -610,7 +610,7 @@ export async function POST(req: NextRequest) {
           {role:'user',content:message},
         ];
         try {
-          const answer = await runGitHubModelsLoop(ghFallback,'gpt-4o',ghMsgs,systemCtx,activeSchemas,userGhToken,sbToken,sbUrl,vrToken);
+          const answer = await runGitHubModelsLoop(ghFallback,'gpt-4o',ghMsgs,systemCtx,activeSchemas,userGhToken,sbToken,sbUrl,vrToken,_toolCallLog);
           return NextResponse.json({ text:answer, model:'gpt-4o (auto-fallback)' });
         } catch { /* fall through */ }
       }
@@ -621,7 +621,7 @@ export async function POST(req: NextRequest) {
     let currentContents = [...baseContents];
     let currentRes = geminiRes;
     _estimatedTokens = 0;
-    _toolCallLog = [];
+    const _toolCallLog: Array<{name: string; args: Record<string,string>; result: string}> = [];
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       // Token budget circuit breaker
@@ -672,7 +672,7 @@ export async function POST(req: NextRequest) {
           if (!val.ok) {
             result = `Validation error: ${val.error}`;
           } else {
-            result = await dispatchTool(fn.name, fn.args||{}, userGhToken, sbToken, sbUrl, vrToken);
+            result = await dispatchTool(fn.name, fn.args||{}, userGhToken, sbToken, sbUrl, vrToken, _toolCallLog);
           }
           _estimatedTokens += Math.ceil(result.length / 4);
           return { functionResponse: { name:fn.name, response:{ result } } };
