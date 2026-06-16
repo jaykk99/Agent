@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 // Redirect to GitHub OAuth flow instead of using a hardcoded server token.
 // The actual token exchange happens in /api/github/callback/route.ts
 export async function GET() {
