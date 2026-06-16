@@ -6,6 +6,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 // SSRF blocklist — prevent hitting internal services
 const BLOCKED_HOSTS = [
   'localhost', '127.0.0.1', '0.0.0.0', '::1',
