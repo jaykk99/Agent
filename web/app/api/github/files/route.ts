@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 const getToken = () => process.env.GITHUB_TOKEN;
 
 // GET: read file or list directory
