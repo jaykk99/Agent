@@ -261,7 +261,7 @@ async function runGitHubModelsLoop(
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ }
       const val = validateToolArgs(tc.function.name, args);
       const result = val.ok
-        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken)
+        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken, _toolCallLog)
         : `Validation error: ${val.error}`;
       msgs.push({ role:'tool', content:result, tool_call_id:tc.id, name:tc.function.name });
     }
@@ -560,6 +560,7 @@ export async function POST(req: NextRequest) {
     // Build contextual system prompt
     let systemCtx = SYSTEM_PROMPT;
     const ghUsername = (settings?.github_username || '') as string;
+    const _toolCallLog: Array<{name: string; args: Record<string,string>; result: string}> = [];
     if (hasGh && ghUsername) {
       // Fetch the user's repos for context (top 25 most recently pushed)
       let repoCtx = '';
@@ -667,7 +668,6 @@ export async function POST(req: NextRequest) {
     let currentContents = [...baseContents];
     let currentRes = geminiRes;
     _estimatedTokens = 0;
-    const _toolCallLog: Array<{name: string; args: Record<string,string>; result: string}> = [];
 
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       // Token budget circuit breaker
