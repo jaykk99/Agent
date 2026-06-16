@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code');
   const baseUrl = process.env.NEXTAUTH_URL || `https://${process.env.VERCEL_URL}` || 'http://localhost:3000';
