@@ -485,8 +485,7 @@ export default function Home() {
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const lines2 = buffer.split('
-');
+          const lines2 = buffer.split('\n');
           buffer = lines2.pop() || '';
           for (const line of lines2) {
             if (!line.startsWith('data:')) continue;
