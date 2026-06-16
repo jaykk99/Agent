@@ -10,6 +10,9 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 const MCP_SERVERS = [
   { name: 'fetch',               type: 'builtin', enabled: true,  description: 'Fetch URLs as clean text' },
   { name: 'memory',              type: 'builtin', enabled: true,  description: 'Key-value memory store' },
