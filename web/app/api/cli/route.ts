@@ -41,7 +41,7 @@ const BLOCKED_ARGS = [
 
 function isSafe(tool: string, args: string[]): { ok: boolean; reason?: string } {
   if (!ALLOWED_TOOLS.has(tool)) {
-    return { ok: false, reason: `Tool '${tool}' is not in the allowed list. Allowed: ${[...ALLOWED_TOOLS].join(', ')}` };
+    return { ok: false, reason: `Tool '${tool}' is not in the allowed list. Allowed: ${Array.from(ALLOWED_TOOLS).join(', ')}` };
   }
   const full = args.join(' ');
   for (const blocked of BLOCKED_ARGS) {
@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
 
 // ── GET /api/cli — list available/missing tools ───────────────────────────
 export async function GET() {
-  const toolList = [...ALLOWED_TOOLS];
+  const toolList = Array.from(ALLOWED_TOOLS);
   const checks = await Promise.all(
     toolList.map(async (t) => ({ tool: t, available: await checkAvailable(t) }))
   );
