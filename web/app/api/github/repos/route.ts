@@ -4,6 +4,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   const ip = getClientIp(req);
   const rl = rateLimit(ip, 'github-repos', 10, 60);
