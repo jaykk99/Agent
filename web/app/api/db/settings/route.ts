@@ -5,6 +5,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabase } from '@/lib/supabase';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
 
+export const runtime = 'nodejs';
+export const dynamic  = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session_id = req.nextUrl.searchParams.get('session_id');
