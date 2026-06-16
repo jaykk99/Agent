@@ -261,7 +261,7 @@ async function runGitHubModelsLoop(
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ }
       const val = validateToolArgs(tc.function.name, args);
       const result = val.ok
-        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken, _toolCallLog)
+        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken, toolLog)
         : `Validation error: ${val.error}`;
       msgs.push({ role:'tool', content:result, tool_call_id:tc.id, name:tc.function.name });
     }
