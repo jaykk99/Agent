@@ -261,7 +261,7 @@ async function runGitHubModelsLoop(
       try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ }
       const val = validateToolArgs(tc.function.name, args);
       const result = val.ok
-        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken, toolLog)
+        ? await dispatchTool(tc.function.name, args, ghToken, sbToken, sbUrl, vrToken, toolLog, ghUsername)
         : `Validation error: ${val.error}`;
       msgs.push({ role:'tool', content:result, tool_call_id:tc.id, name:tc.function.name });
     }
@@ -270,7 +270,7 @@ async function runGitHubModelsLoop(
 }
 
 // ── Central tool dispatcher ────────────────────────────────────────────────────
-async function dispatchTool(name: string, args: Record<string,string>, ghToken: string, sbToken: string, sbUrl: string, vrToken: string, toolLog: Array<{name:string;args:Record<string,string>;result:string}>): Promise<string> {
+async function dispatchTool(name: string, args: Record<string,string>, ghToken: string, sbToken: string, sbUrl: string, vrToken: string, toolLog: Array<{name:string;args:Record<string,string>;result:string}>, ghUsername = ''): Promise<string> {
   const schema = TOOL_REGISTRY.find(s => s.name === name);
   if (!schema) return `Unknown tool: ${name}`;
   let result: string;
