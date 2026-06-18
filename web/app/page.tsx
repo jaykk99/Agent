@@ -19,6 +19,7 @@ interface Message {
   api_call_url?: string;
   api_call_response?: string;
   api_call_status?: number;
+  streaming?: boolean;
 }
 interface ToolCallRecord {
   name: string;
@@ -66,7 +67,7 @@ interface GitHubRepo { id: number; name: string; full_name: string; description:
 
 const DEFAULT_SETTINGS: AppSettings = {
   is_custom_gemini_key_enabled: false, custom_gemini_api_key: '',
-  active_model_name: 'gemini-2.5-flash', is_custom_model_enabled: false,
+  active_model_name: 'llama-3.3-70b-versatile', is_custom_model_enabled: false,
   custom_model_endpoint: '', custom_model_api_key: '', custom_model_name: '',
   hf_api_key: '',
   github_token: '', github_username: '', github_avatar_url: '', is_github_connected: false,
@@ -220,6 +221,8 @@ function MessageBubble({ msg, idx, onDelete, onCopy, copied }: {
           {msg.status === 'ERROR' && <AlertCircle size={14} className="inline mr-1 text-red-400"/>}
           {msg.is_user ? (
             <span className="whitespace-pre-wrap">{msg.text}</span>
+          ) : msg.streaming && !msg.text ? (
+            <span className="inline-block w-2 h-4 bg-indigo-400 animate-pulse rounded-sm"/>
           ) : (
             <div
               className="prose-sm prose-invert"
@@ -474,12 +477,17 @@ export default function Home() {
       let resp: { text?: string; error?: string; model?: string; tool_calls?: ToolCallRecord[]; detected_keys?: Array<{ field: string; value: string }> };
 
       if (contentType.includes('text/event-stream')) {
-        // ── SSE streaming path ──────────────────────────────────────────
+        // SSE streaming path -- live word-by-word rendering
         const reader = chatRes.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         const toolCallsAccum: ToolCallRecord[] = [];
         let finalText = '';
+        let streamingStarted = false;
+
+        // Push a live placeholder immediately -- user sees output right away
+        setMessages(prev => [...prev, { text: '', is_user: false, status: 'STREAMING', streaming: true }]);
+        setThinkingStatus('');
 
         while (true) {
           const { done, value } = await reader.read();
@@ -494,19 +502,35 @@ export default function Home() {
             try {
               const chunk = JSON.parse(raw);
               if (chunk.type === 'tool_start') {
-                setThinkingStatus(`🔧 ${chunk.tool || chunk.name || 'tool'}…`);
+                setThinkingStatus(`🔧 ${chunk.tool || chunk.name || 'tool'}...`);
                 toolCallsAccum.push({ name: chunk.tool || chunk.name, args: chunk.args || {}, result: '' });
               } else if (chunk.type === 'tool_result') {
                 const last = toolCallsAccum[toolCallsAccum.length - 1];
                 if (last) last.result = chunk.result || '';
-                setThinkingStatus(`✓ ${chunk.tool || ''} — thinking…`);
-              } else if (chunk.type === 'done' || chunk.text) {
-                finalText = chunk.text || finalText;
+                setThinkingStatus(`done -- thinking...`);
+              } else if (chunk.type === 'text' && chunk.text) {
+                finalText += chunk.text;
+                if (!streamingStarted) { streamingStarted = true; setThinkingStatus(''); }
+                setMessages(prev => {
+                  const updated = [...prev];
+                  const idx = updated.findLastIndex((m: Message) => m.streaming);
+                  if (idx >= 0) updated[idx] = { ...updated[idx], text: finalText };
+                  return updated;
+                });
+              } else if (chunk.type === 'done') {
+                if (chunk.text && !finalText) finalText = chunk.text;
+              } else if (chunk.text) {
+                finalText = chunk.text;
               }
             } catch { /* ignore malformed chunk */ }
           }
         }
-        resp = { text: finalText, tool_calls: toolCallsAccum };
+
+        // Remove the streaming placeholder -- replaced by the final committed message below
+        setMessages(prev => prev.filter((m: Message) => !m.streaming));
+        setThinkingStatus('Thinking...');
+
+        resp = { text: finalText, model: (resp as {model?: string})?.model, tool_calls: toolCallsAccum };
       } else {
         // ── Standard JSON path ─────────────────────────────────────────
         resp = await chatRes.json();
