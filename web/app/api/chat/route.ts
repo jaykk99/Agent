@@ -4,14 +4,14 @@
  * Autonomous Agent — Hierarchical Multi-Agent Orchestration Engine
  * ──────────────────────────────────────────────────────────────────────────
  * Architecture:
- *   • Supervisor router selects specialist agent per turn (architect/coder/
- *     debugger/tester/deployer/researcher)
+ *   • Supervisor router selects specialist agent per turn
  *   • Workspace skills injected into system prompts automatically
  *   • Procedural state serialised on every turn (resumable on failure)
  *   • Interactive "Ask Human" flow: pauses when stuck, resumes from exact step
  *   • Circuit breaker: MAX_TURNS + 200k token budget cap
  *   • Self-correction: forces summary turn on empty model output
- *   • Multi-provider: Gemini (primary) → GitHub Models (fallback) → HF
+ *   • Multi-provider: Gemini · OpenAI · GitHub Models · Anthropic · Groq
+ *   • Backward-compatible: accepts { message: string } OR { messages: [...] }
  *   • Rate limiting (20 req/60s per IP)
  *   • Dynamic tool filtering saves ~80% tokens per turn
  */
@@ -39,7 +39,41 @@ const SUMMARY_PROMPT   = 'Summarise EVERYTHING you found and did: every file rea
 const _agentMemory: Record<string, string> = {};
 let _estimatedTokens = 0;
 
-// ── Tool Schema Registry (runtime validation) ───────────────────────────────
+// ── Supported models registry ────────────────────────────────────────────────
+export const SUPPORTED_MODELS = [
+  // Gemini (Google)
+  { id: 'gemini-2.5-flash',          label: 'Gemini 2.5 Flash',         provider: 'gemini',    tier: 'fast',    toolUse: true  },
+  { id: 'gemini-2.5-pro',            label: 'Gemini 2.5 Pro',           provider: 'gemini',    tier: 'smart',   toolUse: true  },
+  { id: 'gemini-2.0-flash',          label: 'Gemini 2.0 Flash',         provider: 'gemini',    tier: 'fast',    toolUse: true  },
+  { id: 'gemini-1.5-pro',            label: 'Gemini 1.5 Pro',           provider: 'gemini',    tier: 'smart',   toolUse: true  },
+  { id: 'gemini-1.5-flash',          label: 'Gemini 1.5 Flash',         provider: 'gemini',    tier: 'fast',    toolUse: true  },
+  // OpenAI (via OPENAI_API_KEY or GitHub Models)
+  { id: 'gpt-4o',                    label: 'GPT-4o',                   provider: 'openai',    tier: 'smart',   toolUse: true  },
+  { id: 'gpt-4o-mini',               label: 'GPT-4o Mini',              provider: 'openai',    tier: 'fast',    toolUse: true  },
+  { id: 'gpt-4.1',                   label: 'GPT-4.1',                  provider: 'github',    tier: 'smart',   toolUse: true  },
+  { id: 'gpt-4.1-mini',              label: 'GPT-4.1 Mini',             provider: 'github',    tier: 'fast',    toolUse: true  },
+  { id: 'o4-mini',                   label: 'o4-mini (reasoning)',      provider: 'github',    tier: 'reason',  toolUse: false },
+  { id: 'o3-mini',                   label: 'o3-mini (reasoning)',      provider: 'github',    tier: 'reason',  toolUse: false },
+  // Anthropic Claude
+  { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet',       provider: 'anthropic', tier: 'smart',   toolUse: true  },
+  { id: 'claude-3-5-haiku-20241022',  label: 'Claude 3.5 Haiku',        provider: 'anthropic', tier: 'fast',    toolUse: true  },
+  { id: 'claude-opus-4-5',            label: 'Claude Opus 4.5',         provider: 'anthropic', tier: 'smart',   toolUse: true  },
+  // Groq (fast open-source)
+  { id: 'llama-3.3-70b-versatile',   label: 'Llama 3.3 70B (Groq)',    provider: 'groq',      tier: 'fast',    toolUse: true  },
+  { id: 'llama-3.1-8b-instant',      label: 'Llama 3.1 8B (Groq)',     provider: 'groq',      tier: 'fast',    toolUse: false },
+  { id: 'mixtral-8x7b-32768',        label: 'Mixtral 8x7B (Groq)',     provider: 'groq',      tier: 'fast',    toolUse: false },
+  { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 (Groq)', provider: 'groq',      tier: 'reason',  toolUse: false },
+] as const;
+
+type ModelEntry = typeof SUPPORTED_MODELS[number];
+type Provider = ModelEntry['provider'];
+
+function getModelMeta(modelId: string): ModelEntry {
+  return (SUPPORTED_MODELS.find(m => m.id === modelId) as ModelEntry | undefined) ??
+    { id: modelId, label: modelId, provider: 'gemini' as Provider, tier: 'fast', toolUse: true };
+}
+
+// ── Tool Schema Registry ─────────────────────────────────────────────────────
 interface ToolSchema {
   name: string;
   description: string;
@@ -49,7 +83,6 @@ interface ToolSchema {
 }
 
 const TOOL_REGISTRY: ToolSchema[] = [
-  // GitHub
   { name: 'list_github_directory', description: 'List files/folders in a GitHub repo directory. Call first to explore structure.', params: { repo:{type:'string'}, path:{type:'string'} }, required: ['repo'], category: 'github' },
   { name: 'read_github_file',      description: 'Read full file content + SHA. ALWAYS call this before write_github_file to get the SHA.', params: { repo:{type:'string'}, path:{type:'string'}, ref:{type:'string'} }, required: ['repo','path'], category: 'github' },
   { name: 'write_github_file',     description: 'Create or update a file. REQUIRES sha param for existing files (get it from read_github_file first).', params: { repo:{type:'string'}, path:{type:'string'}, content:{type:'string'}, message:{type:'string'}, sha:{type:'string'}, branch:{type:'string'} }, required: ['repo','path','content','message'], category: 'github' },
@@ -57,34 +90,26 @@ const TOOL_REGISTRY: ToolSchema[] = [
   { name: 'search_github_code',    description: 'Search code across a GitHub repo.', params: { query:{type:'string'}, repo:{type:'string'} }, required: ['query'], category: 'github' },
   { name: 'create_github_branch',  description: 'Create a new branch in a GitHub repo.', params: { repo:{type:'string'}, branch:{type:'string'}, from_branch:{type:'string'} }, required: ['repo','branch'], category: 'github' },
   { name: 'create_github_pr',      description: 'Create a pull request.', params: { repo:{type:'string'}, title:{type:'string'}, head:{type:'string'}, base:{type:'string'}, body:{type:'string'} }, required: ['repo','title','head','base'], category: 'github' },
-  // MCP
   { name: 'mcp_fetch_url',  description: 'Fetch a URL as clean text.', params: { url:{type:'string'}, max_length:{type:'string'} }, required: ['url'], category: 'mcp' },
   { name: 'mcp_remember',   description: 'Store a key/value in memory.', params: { key:{type:'string'}, value:{type:'string'} }, required: ['key','value'], category: 'mcp' },
   { name: 'mcp_recall',     description: 'Retrieve a stored memory by key.', params: { key:{type:'string'} }, required: ['key'], category: 'mcp' },
-  // Supabase
   { name: 'execute_supabase_sql', description: 'Execute a SQL query on the connected Supabase project.', params: { sql:{type:'string'}, project_ref:{type:'string'} }, required: ['sql'], category: 'supabase' },
   { name: 'list_supabase_tables', description: 'List all tables in the connected Supabase project.', params: { project_ref:{type:'string'} }, required: [], category: 'supabase' },
-  // Vercel
   { name: 'list_vercel_projects',    description: 'List Vercel projects for the connected account.', params: {}, required: [], category: 'vercel' },
   { name: 'get_vercel_deployments',  description: 'Get recent deployments for a Vercel project.', params: { project_id:{type:'string'} }, required: ['project_id'], category: 'vercel' },
   { name: 'trigger_vercel_redeploy', description: 'Trigger a redeployment of a Vercel project.', params: { deployment_id:{type:'string'} }, required: ['deployment_id'], category: 'vercel' },
-  // CLI / System
   { name: 'run_cli_command', description: 'Run a safe shell command (git, npm, node, npx). No sudo/rm -rf.', params: { command:{type:'string'} }, required: ['command'], category: 'cli' },
 ];
 
-// ── Gemini tool format ────────────────────────────────────────────────────────
+// ── Tool format builders ─────────────────────────────────────────────────────
+
 function buildGeminiTools(allowedCategories: string[]): object[] {
   const filtered = allowedCategories.length > 0
     ? TOOL_REGISTRY.filter(t => allowedCategories.includes(t.category))
     : TOOL_REGISTRY;
-
-  const props: Record<string, object> = {};
-  const required: string[] = [];
-
-  // Build as single functionDeclarations block
   return [{
     functionDeclarations: filtered.map(tool => ({
-      name:       tool.name,
+      name:        tool.name,
       description: tool.description,
       parameters: {
         type: 'OBJECT',
@@ -97,6 +122,43 @@ function buildGeminiTools(allowedCategories: string[]): object[] {
   }];
 }
 
+function buildOpenAITools(allowedCategories: string[]): object[] {
+  const filtered = allowedCategories.length > 0
+    ? TOOL_REGISTRY.filter(t => allowedCategories.includes(t.category))
+    : TOOL_REGISTRY;
+  return filtered.map(tool => ({
+    type: 'function',
+    function: {
+      name:        tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        properties: Object.fromEntries(
+          Object.entries(tool.params).map(([k, v]) => [k, { type: v.type, description: k }]),
+        ),
+        required: tool.required,
+      },
+    },
+  }));
+}
+
+function buildAnthropicTools(allowedCategories: string[]): object[] {
+  const filtered = allowedCategories.length > 0
+    ? TOOL_REGISTRY.filter(t => allowedCategories.includes(t.category))
+    : TOOL_REGISTRY;
+  return filtered.map(tool => ({
+    name:        tool.name,
+    description: tool.description,
+    input_schema: {
+      type: 'object',
+      properties: Object.fromEntries(
+        Object.entries(tool.params).map(([k, v]) => [k, { type: v.type, description: k }]),
+      ),
+      required: tool.required,
+    },
+  }));
+}
+
 // ── Gemini content builder ────────────────────────────────────────────────────
 function buildContents(messages: { role: string; content: string }[]) {
   return messages
@@ -107,7 +169,12 @@ function buildContents(messages: { role: string; content: string }[]) {
     }));
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
+// ── GET handler — model list ──────────────────────────────────────────────────
+export async function GET() {
+  return NextResponse.json({ models: SUPPORTED_MODELS });
+}
+
+// ── Main POST handler ─────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   // Rate limiting
   const ip = (req.headers.get('x-forwarded-for') ?? '127.0.0.1').split(',')[0].trim();
@@ -119,60 +186,66 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let requestBody: {
-    messages?:    { role: string; content: string }[];
-    sessionId?:   string;
-    settings?:    Record<string, string | boolean>;
-    stateId?:     string;  // resume from existing state
-    userReply?:   string;  // user reply to an Ask Human request
-  };
-
+  let requestBody: Record<string, unknown>;
   try {
     requestBody = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const {
-    messages = [],
-    sessionId = `anon_${Date.now()}`,
-    settings = {},
-    stateId: existingStateId,
-    userReply,
-  } = requestBody;
+  // ── Backward-compatible messages parsing ─────────────────────────────────
+  // Accepts:
+  //   { messages: [{ role, content }] }  — standard array format
+  //   { message: "string" }              — legacy single-message format
+  //   { prompt: "string" }               — legacy prompt format
+  const messages: { role: string; content: string }[] =
+    Array.isArray(requestBody.messages)
+      ? (requestBody.messages as { role: string; content: string }[]).filter(m => m?.role && m?.content)
+      : typeof requestBody.message === 'string' && requestBody.message.trim()
+        ? [{ role: 'user', content: requestBody.message as string }]
+        : typeof requestBody.prompt === 'string' && requestBody.prompt.trim()
+          ? [{ role: 'user', content: requestBody.prompt as string }]
+          : [];
 
   if (!messages.length) {
-    return NextResponse.json({ error: 'messages array is required' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'messages array is required — send { messages: [{ role: "user", content: "..." }] } or { message: "..." }' },
+      { status: 400 },
+    );
   }
 
-  // ── Resolve API key ─────────────────────────────────────────────────────
-  const geminiKey =
-    (settings.is_custom_gemini_key_enabled && settings.custom_gemini_api_key as string) ||
-    process.env.GEMINI_API_KEY ||
-    process.env.GOOGLE_GENERATIVE_AI_KEY ||
-    '';
+  const sessionId  = (requestBody.sessionId  as string | undefined) ?? `anon_${Date.now()}`;
+  const settings   = (requestBody.settings   as Record<string, string | boolean> | undefined) ?? {};
+  const existingStateId = requestBody.stateId as string | undefined;
+  const userReply       = requestBody.userReply as string | undefined;
 
-  const modelName = (settings.active_model_name as string) || 'gemini-2.5-flash';
-  const githubToken = (settings.github_token as string) || process.env.GITHUB_TOKEN || '';
+  // ── Resolve keys & model ─────────────────────────────────────────────────
+  const geminiKey    = (settings.custom_gemini_api_key  as string | undefined) || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_KEY || '';
+  const openaiKey    = (settings.openai_api_key         as string | undefined) || process.env.OPENAI_API_KEY || '';
+  const anthropicKey = (settings.anthropic_api_key      as string | undefined) || process.env.ANTHROPIC_API_KEY || '';
+  const groqKey      = (settings.groq_api_key           as string | undefined) || process.env.GROQ_API_KEY || '';
+  const githubToken  = (settings.github_token           as string | undefined) || process.env.GITHUB_TOKEN || '';
 
-  // ── Build / restore execution state ────────────────────────────────────
+  const rawModelName = (settings.active_model_name as string | undefined) || (settings.model as string | undefined) || 'gemini-2.5-flash';
+  const modelMeta    = getModelMeta(rawModelName);
+
+  // ── Build / restore execution state ─────────────────────────────────────
   const userGoal = messages.find(m => m.role === 'user')?.content ?? 'No goal specified';
   let execState = existingStateId
     ? await import('@/lib/agentState').then(m => m.loadState(existingStateId)).then(s => s ?? createState(sessionId, userGoal))
     : createState(sessionId, userGoal);
 
-  // If this is a resume from Ask Human, patch the state
   if (userReply && existingStateId) {
     await import('@/lib/agentState').then(m => m.resolveHumanRequest(existingStateId, userReply));
     execState = await import('@/lib/agentState').then(m =>
       m.updateState(execState.stateId, {
-        activeRole:  'coder',
+        activeRole:   'coder',
         pendingTasks: [...execState.pendingTasks, `User replied: ${userReply}`],
       }).then(s => s ?? execState),
     );
   }
 
-  // ── Supervisor routing ──────────────────────────────────────────────────
+  // ── Supervisor routing ────────────────────────────────────────────────────
   const executionCtx: ExecutionContext = {
     sessionId,
     goal:             userGoal,
@@ -186,12 +259,12 @@ export async function POST(req: NextRequest) {
   const routingDecision = supervisorRoute(executionCtx);
   const activeRole = routingDecision.role;
 
-  // ── Load workspace skills for this context ──────────────────────────────
-  const contextText = `${userGoal} ${executionCtx.currentStep}`;
+  // ── Load workspace skills ─────────────────────────────────────────────────
+  const contextText  = `${userGoal} ${executionCtx.currentStep}`;
   const activeSkills = await selectActiveSkills(sessionId, contextText);
   const skillsBlock  = buildSkillsBlock(activeSkills);
 
-  // ── Build system prompt with role + skills ──────────────────────────────
+  // ── Build system prompt ───────────────────────────────────────────────────
   const agentPromptFragment = buildAgentSystemPrompt(activeRole, activeSkills.map(s => s.name));
   const systemPrompt = [
     agentPromptFragment,
@@ -215,7 +288,7 @@ export async function POST(req: NextRequest) {
       : '',
   ].filter(Boolean).join('\n');
 
-  // ── Agent role → allowed tool categories ───────────────────────────────
+  // ── Agent role → allowed tool categories ─────────────────────────────────
   const roleCategories: Record<string, string[]> = {
     architect:  ['github', 'mcp', 'cli'],
     coder:      ['github', 'mcp', 'cli', 'supabase'],
@@ -223,205 +296,77 @@ export async function POST(req: NextRequest) {
     tester:     ['github', 'cli'],
     deployer:   ['vercel', 'supabase', 'github', 'cli'],
     researcher: ['mcp', 'cli'],
-    supervisor: [], // supervisor doesn't call tools directly
+    supervisor: [],
   };
   const allowedCategories = roleCategories[activeRole] ?? [];
-  const tools = buildGeminiTools(allowedCategories);
 
-  // ── Token estimation ────────────────────────────────────────────────────
+  // Token estimate
   _estimatedTokens = Math.floor(
     systemPrompt.length / 4 +
     messages.reduce((s, m) => s + (m.content?.length ?? 0) / 4, 0),
   );
 
-  // ── Streaming response ──────────────────────────────────────────────────
+  // ── Streaming response ────────────────────────────────────────────────────
   const encoder  = new TextEncoder();
-  let toolCalls: { name: string; args: Record<string, unknown>; result?: string }[] = [];
+  const toolCallLog: { name: string; args: Record<string, unknown>; result?: string }[] = [];
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (chunk: string) => controller.enqueue(encoder.encode(chunk));
 
       try {
-        // Emit routing metadata to client
         send(`data: ${JSON.stringify({
           type: 'routing',
           role: activeRole,
+          model: modelMeta.id,
+          provider: modelMeta.provider,
           confidence: routingDecision.confidence,
           reasoning: routingDecision.reasoning,
           activeSkills: activeSkills.map(s => s.name),
         })}\n\n`);
 
-        let conversationMessages = buildContents(messages);
-        let turns = 0;
-        let lastText = '';
-
-        while (turns < MAX_TURNS && _estimatedTokens < MAX_COST_TOKENS) {
-          turns++;
-
-          // ── Call Gemini ──────────────────────────────────────────────
-          let geminiRes: Response;
-          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
-          const geminiBody = {
-            system_instruction: { parts: [{ text: systemPrompt }] },
-            contents:           conversationMessages,
-            tools,
-            generationConfig: {
-              temperature:     0.7,
-              maxOutputTokens: 8192,
-            },
-          };
-
-          try {
-            geminiRes = await fetch(endpoint, {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body:    JSON.stringify(geminiBody),
-              signal:  AbortSignal.timeout(60_000),
-            });
-          } catch (fetchErr) {
-            const msg = fetchErr instanceof Error ? fetchErr.message : 'Network error';
-            send(`data: ${JSON.stringify({ type: 'error', content: `Gemini connection failed: ${msg}` })}\n\n`);
-            break;
-          }
-
-          if (!geminiRes.ok) {
-            const errText = await geminiRes.text().catch(() => '');
-            // Fallback to GitHub Models if Gemini is unavailable
-            const fallbackResult = await tryGithubModelsFallback(
-              systemPrompt, messages, githubToken,
-            );
-            if (fallbackResult) {
-              send(`data: ${JSON.stringify({ type: 'text', content: fallbackResult })}\n\n`);
-            } else {
-              send(`data: ${JSON.stringify({ type: 'error', content: `API error ${geminiRes.status}: ${errText.slice(0, 200)}` })}\n\n`);
-            }
-            break;
-          }
-
-          const geminiData = await geminiRes.json();
-          const candidate  = geminiData.candidates?.[0];
-          if (!candidate) {
-            send(`data: ${JSON.stringify({ type: 'error', content: 'No response from model.' })}\n\n`);
-            break;
-          }
-
-          // Update token estimate
-          if (geminiData.usageMetadata) {
-            _estimatedTokens = geminiData.usageMetadata.totalTokenCount ?? _estimatedTokens;
-          }
-
-          const parts = candidate.content?.parts ?? [];
-          let textThisTurn  = '';
-          const functionCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
-
-          for (const part of parts) {
-            if (part.text)         textThisTurn += part.text;
-            if (part.functionCall) functionCalls.push(part.functionCall);
-          }
-
-          // Emit any text
-          if (textThisTurn) {
-            lastText = textThisTurn;
-
-            // Check for HITL escalation signal
-            const escalationReason = extractEscalation(textThisTurn);
-            if (escalationReason) {
-              // Save state and raise Ask Human
-              await updateState(execState.stateId, {
-                errorLog: [...execState.errorLog, escalationReason],
-              });
-              const askReq = await pauseForHuman(execState, escalationReason);
-              send(`data: ${JSON.stringify({
-                type:       'ask_human',
-                stateId:    askReq.stateId,
-                resumeStep: askReq.resumeStep,
-                reason:     escalationReason,
-                errorLog:   execState.errorLog,
-              })}\n\n`);
-              break;
-            }
-
-            // Stream text to client
-            for (const chunk of textThisTurn.split(/(?<=\n)/)) {
-              send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
-              await new Promise(r => setTimeout(r, 0));
-            }
-          }
-
-          // Self-correction: force summary if empty
-          if (!textThisTurn && !functionCalls.length) {
-            conversationMessages.push({
-              role:  'user',
-              parts: [{ text: SUMMARY_PROMPT }],
-            });
-            send(`data: ${JSON.stringify({ type: 'system', content: '[Auto-requesting summary after empty response]' })}\n\n`);
-            continue;
-          }
-
-          // No tool calls → we're done
-          if (!functionCalls.length) break;
-
-          // ── Execute tool calls ──────────────────────────────────────────
-          conversationMessages.push({ role: 'model', parts });
-          const toolResults: object[] = [];
-
-          for (const call of functionCalls) {
-            const { name, args } = call;
-            send(`data: ${JSON.stringify({ type: 'tool_call', tool: name, args })}\n\n`);
-
-            let result = '';
-            try {
-              result = await executeTool(name, args, { githubToken, sessionId });
-            } catch (e) {
-              const errMsg = e instanceof Error ? e.message : String(e);
-              result = `Error: ${errMsg}`;
-              // Track errors for state
-              execState.errorLog.push(`${name}: ${errMsg}`);
-              await updateState(execState.stateId, { errorLog: execState.errorLog });
-            }
-
-            toolCalls.push({ name, args, result });
-            send(`data: ${JSON.stringify({ type: 'tool_result', tool: name, result: result.slice(0, 500) })}\n\n`);
-
-            toolResults.push({
-              functionResponse: { name, response: { content: result } },
-            });
-          }
-
-          conversationMessages.push({ role: 'user', parts: toolResults });
-        }
-
-        // Circuit breaker notification
-        if (turns >= MAX_TURNS) {
-          send(`data: ${JSON.stringify({ type: 'system', content: `[Circuit breaker: reached ${MAX_TURNS} turns]` })}\n\n`);
-        }
-        if (_estimatedTokens >= MAX_COST_TOKENS) {
-          send(`data: ${JSON.stringify({ type: 'system', content: `[Token budget exhausted: ${_estimatedTokens} tokens]` })}\n\n`);
+        // ── Dispatch to the right provider loop ──────────────────────────
+        if (modelMeta.provider === 'gemini') {
+          await runGeminiLoop({
+            send, messages, systemPrompt, modelName: modelMeta.id,
+            geminiKey, githubToken, allowedCategories,
+            execState, sessionId, activeRole, activeSkills, toolCallLog,
+          });
+        } else if (modelMeta.provider === 'anthropic') {
+          await runAnthropicLoop({
+            send, messages, systemPrompt, modelName: modelMeta.id,
+            anthropicKey, allowedCategories,
+            execState, sessionId, activeRole, activeSkills, toolCallLog,
+          });
+        } else {
+          // openai / github / groq — all OpenAI-compatible
+          await runOpenAICompatLoop({
+            send, messages, systemPrompt, modelMeta,
+            openaiKey, githubToken, groqKey, allowedCategories,
+            execState, sessionId, activeRole, activeSkills, toolCallLog,
+          });
         }
 
         // Persist final state
         await updateState(execState.stateId, {
-          activeRole:   activeRole,
+          activeRole,
           activeSkills: activeSkills.map(s => s.name),
-          stepIndex:    execState.stepIndex + turns,
+          stepIndex:    execState.stepIndex + 1,
         });
 
         send(`data: ${JSON.stringify({
-          type:         'done',
-          model:        modelName,
-          role:         activeRole,
-          toolCallCount: toolCalls.length,
-          turns,
+          type: 'done',
+          model: modelMeta.id,
+          provider: modelMeta.provider,
+          role: activeRole,
+          toolCallCount: toolCallLog.length,
           estimatedTokens: _estimatedTokens,
-          stateId:      execState.stateId,
+          stateId: execState.stateId,
         })}\n\n`);
 
       } catch (outerErr: unknown) {
         const msg = outerErr instanceof Error ? outerErr.message : 'Internal error';
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({ type: 'error', content: msg })}\n\n`,
-        ));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', content: msg })}\n\n`));
       } finally {
         controller.close();
       }
@@ -437,7 +382,349 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// ── Tool Executor ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// Provider loops
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface LoopCtx {
+  send: (s: string) => void;
+  messages: { role: string; content: string }[];
+  systemPrompt: string;
+  allowedCategories: string[];
+  execState: ReturnType<typeof createState>;
+  sessionId: string;
+  activeRole: string;
+  activeSkills: Awaited<ReturnType<typeof selectActiveSkills>>;
+  toolCallLog: { name: string; args: Record<string, unknown>; result?: string }[];
+}
+
+// ── Gemini loop ───────────────────────────────────────────────────────────────
+async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: string; githubToken: string }) {
+  const { send, messages, systemPrompt, modelName, geminiKey, githubToken, allowedCategories, execState, toolCallLog } = ctx;
+  const tools = buildGeminiTools(allowedCategories);
+  let conversationMessages = buildContents(messages);
+  let turns = 0;
+
+  while (turns < MAX_TURNS && _estimatedTokens < MAX_COST_TOKENS) {
+    turns++;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
+    let geminiRes: Response;
+    try {
+      geminiRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: conversationMessages,
+          tools,
+          generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      send(`data: ${JSON.stringify({ type: 'error', content: `Gemini connection failed: ${e instanceof Error ? e.message : 'network'}` })}\n\n`);
+      break;
+    }
+
+    if (!geminiRes.ok) {
+      // Fallback to GitHub Models gpt-4o-mini
+      const fallback = await tryGithubModelsFallback(systemPrompt, messages, githubToken);
+      if (fallback) {
+        send(`data: ${JSON.stringify({ type: 'text', content: fallback })}\n\n`);
+      } else {
+        const errText = await geminiRes.text().catch(() => '');
+        send(`data: ${JSON.stringify({ type: 'error', content: `Gemini ${geminiRes.status}: ${errText.slice(0, 200)}` })}\n\n`);
+      }
+      break;
+    }
+
+    const geminiData = await geminiRes.json();
+    if (geminiData.usageMetadata) _estimatedTokens = geminiData.usageMetadata.totalTokenCount ?? _estimatedTokens;
+
+    const candidate = geminiData.candidates?.[0];
+    if (!candidate) { send(`data: ${JSON.stringify({ type: 'error', content: 'No response from Gemini.' })}\n\n`); break; }
+
+    const parts        = candidate.content?.parts ?? [];
+    let textThisTurn   = '';
+    const functionCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+
+    for (const part of parts) {
+      if (part.text)         textThisTurn += part.text;
+      if (part.functionCall) functionCalls.push(part.functionCall);
+    }
+
+    if (textThisTurn) {
+      const escalation = extractEscalation(textThisTurn);
+      if (escalation) {
+        await updateState(execState.stateId, { errorLog: [...execState.errorLog, escalation] });
+        const askReq = await pauseForHuman(execState, escalation);
+        send(`data: ${JSON.stringify({ type: 'ask_human', stateId: askReq.stateId, resumeStep: askReq.resumeStep, reason: escalation, errorLog: execState.errorLog })}\n\n`);
+        break;
+      }
+      for (const chunk of textThisTurn.split(/(?<=\n)/)) {
+        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (!textThisTurn && !functionCalls.length) {
+      conversationMessages.push({ role: 'user', parts: [{ text: SUMMARY_PROMPT }] } as never);
+      send(`data: ${JSON.stringify({ type: 'system', content: '[Auto-requesting summary]' })}\n\n`);
+      continue;
+    }
+    if (!functionCalls.length) break;
+
+    conversationMessages.push({ role: 'model', parts } as never);
+    const toolResults: object[] = [];
+
+    for (const call of functionCalls) {
+      send(`data: ${JSON.stringify({ type: 'tool_call', tool: call.name, args: call.args })}\n\n`);
+      let result = '';
+      try {
+        result = await executeTool(call.name, call.args, { githubToken, sessionId: ctx.sessionId });
+      } catch (e) {
+        result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+        execState.errorLog.push(`${call.name}: ${result}`);
+        await updateState(execState.stateId, { errorLog: execState.errorLog });
+      }
+      toolCallLog.push({ name: call.name, args: call.args, result });
+      send(`data: ${JSON.stringify({ type: 'tool_result', tool: call.name, result: result.slice(0, 500) })}\n\n`);
+      toolResults.push({ functionResponse: { name: call.name, response: { content: result } } });
+    }
+    conversationMessages.push({ role: 'user', parts: toolResults } as never);
+  }
+
+  if (turns >= MAX_TURNS)     send(`data: ${JSON.stringify({ type: 'system', content: `[Circuit breaker: ${MAX_TURNS} turns]` })}\n\n`);
+  if (_estimatedTokens >= MAX_COST_TOKENS) send(`data: ${JSON.stringify({ type: 'system', content: `[Token budget exhausted: ${_estimatedTokens}]` })}\n\n`);
+}
+
+// ── OpenAI-compatible loop (OpenAI / GitHub Models / Groq) ────────────────────
+async function runOpenAICompatLoop(ctx: LoopCtx & {
+  modelMeta: ModelEntry; openaiKey: string; githubToken: string; groqKey: string;
+}) {
+  const { send, messages, systemPrompt, modelMeta, openaiKey, githubToken, groqKey, allowedCategories, execState, toolCallLog } = ctx;
+
+  // Determine base URL + key
+  let baseUrl: string;
+  let apiKey: string;
+
+  if (modelMeta.provider === 'github') {
+    baseUrl = 'https://models.github.ai/inference';
+    apiKey  = githubToken;
+  } else if (modelMeta.provider === 'groq') {
+    baseUrl = 'https://api.groq.com/openai/v1';
+    apiKey  = groqKey;
+  } else {
+    // openai
+    baseUrl = 'https://api.openai.com/v1';
+    apiKey  = openaiKey || githubToken; // fallback to github token for preview access
+  }
+
+  if (!apiKey) {
+    send(`data: ${JSON.stringify({ type: 'error', content: `No API key configured for provider ${modelMeta.provider}. Set the appropriate key in settings or environment variables.` })}\n\n`);
+    return;
+  }
+
+  const tools = modelMeta.toolUse ? buildOpenAITools(allowedCategories) : undefined;
+  const convMessages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string; name?: string }[] = [
+    { role: 'system', content: systemPrompt },
+    ...messages.map(m => ({ role: m.role, content: m.content })),
+  ];
+
+  let turns = 0;
+  while (turns < MAX_TURNS && _estimatedTokens < MAX_COST_TOKENS) {
+    turns++;
+
+    const body: Record<string, unknown> = {
+      model:       modelMeta.id,
+      messages:    convMessages,
+      max_tokens:  8192,
+      temperature: modelMeta.tier === 'reason' ? 1 : 0.7,
+    };
+    if (tools?.length) body.tools = tools;
+
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/chat/completions`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body:    JSON.stringify(body),
+        signal:  AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      send(`data: ${JSON.stringify({ type: 'error', content: `${modelMeta.provider} connection failed: ${e instanceof Error ? e.message : 'network'}` })}\n\n`);
+      break;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      send(`data: ${JSON.stringify({ type: 'error', content: `${modelMeta.provider} ${res.status}: ${errText.slice(0, 300)}` })}\n\n`);
+      break;
+    }
+
+    const data = await res.json();
+    if (data.usage?.total_tokens) _estimatedTokens = data.usage.total_tokens;
+
+    const choice  = data.choices?.[0];
+    const msg     = choice?.message;
+    if (!msg) { send(`data: ${JSON.stringify({ type: 'error', content: 'No response from model.' })}\n\n`); break; }
+
+    // Text content
+    if (msg.content) {
+      const escalation = extractEscalation(msg.content);
+      if (escalation) {
+        await updateState(execState.stateId, { errorLog: [...execState.errorLog, escalation] });
+        const askReq = await pauseForHuman(execState, escalation);
+        send(`data: ${JSON.stringify({ type: 'ask_human', stateId: askReq.stateId, resumeStep: askReq.resumeStep, reason: escalation, errorLog: execState.errorLog })}\n\n`);
+        break;
+      }
+      for (const chunk of msg.content.split(/(?<=\n)/)) {
+        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    // Tool calls
+    if (!msg.tool_calls?.length) break;
+
+    convMessages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls });
+
+    for (const tc of msg.tool_calls) {
+      const callName = tc.function?.name ?? '';
+      let callArgs: Record<string, unknown> = {};
+      try { callArgs = JSON.parse(tc.function?.arguments ?? '{}'); } catch { /* noop */ }
+
+      send(`data: ${JSON.stringify({ type: 'tool_call', tool: callName, args: callArgs })}\n\n`);
+      let result = '';
+      try {
+        result = await executeTool(callName, callArgs, { githubToken, sessionId: ctx.sessionId });
+      } catch (e) {
+        result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      toolCallLog.push({ name: callName, args: callArgs, result });
+      send(`data: ${JSON.stringify({ type: 'tool_result', tool: callName, result: result.slice(0, 500) })}\n\n`);
+      convMessages.push({ role: 'tool', tool_call_id: tc.id, name: callName, content: result });
+    }
+  }
+}
+
+// ── Anthropic Claude loop ─────────────────────────────────────────────────────
+async function runAnthropicLoop(ctx: LoopCtx & { modelName: string; anthropicKey: string }) {
+  const { send, messages, systemPrompt, modelName, anthropicKey, allowedCategories, execState, toolCallLog } = ctx;
+
+  if (!anthropicKey) {
+    send(`data: ${JSON.stringify({ type: 'error', content: 'No ANTHROPIC_API_KEY configured. Add it to Vercel env vars or pass anthropic_api_key in settings.' })}\n\n`);
+    return;
+  }
+
+  const tools = buildAnthropicTools(allowedCategories);
+  const convMessages = messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }));
+  let turns = 0;
+
+  while (turns < MAX_TURNS && _estimatedTokens < MAX_COST_TOKENS) {
+    turns++;
+
+    const body: Record<string, unknown> = {
+      model:      modelName,
+      max_tokens: 8192,
+      system:     systemPrompt,
+      messages:   convMessages,
+    };
+    if (tools.length) body.tools = tools;
+
+    let res: Response;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method:  'POST',
+        headers: {
+          'Content-Type':      'application/json',
+          'x-api-key':         anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body:   JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      send(`data: ${JSON.stringify({ type: 'error', content: `Anthropic connection failed: ${e instanceof Error ? e.message : 'network'}` })}\n\n`);
+      break;
+    }
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      send(`data: ${JSON.stringify({ type: 'error', content: `Anthropic ${res.status}: ${errText.slice(0, 300)}` })}\n\n`);
+      break;
+    }
+
+    const data = await res.json();
+    if (data.usage?.input_tokens) _estimatedTokens += (data.usage.input_tokens + (data.usage.output_tokens ?? 0));
+
+    const blocks    = data.content ?? [];
+    let textOutput  = '';
+    const toolUseBlocks: Array<{ id: string; name: string; input: Record<string, unknown> }> = [];
+
+    for (const block of blocks) {
+      if (block.type === 'text')     textOutput += block.text;
+      if (block.type === 'tool_use') toolUseBlocks.push(block);
+    }
+
+    if (textOutput) {
+      const escalation = extractEscalation(textOutput);
+      if (escalation) {
+        await updateState(execState.stateId, { errorLog: [...execState.errorLog, escalation] });
+        const askReq = await pauseForHuman(execState, escalation);
+        send(`data: ${JSON.stringify({ type: 'ask_human', stateId: askReq.stateId, resumeStep: askReq.resumeStep, reason: escalation })}\n\n`);
+        break;
+      }
+      for (const chunk of textOutput.split(/(?<=\n)/)) {
+        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (!toolUseBlocks.length) break;
+
+    convMessages.push({ role: 'assistant', content: blocks });
+    const toolResults = [];
+
+    for (const tu of toolUseBlocks) {
+      send(`data: ${JSON.stringify({ type: 'tool_call', tool: tu.name, args: tu.input })}\n\n`);
+      let result = '';
+      try {
+        result = await executeTool(tu.name, tu.input, { githubToken: ctx.sessionId, sessionId: ctx.sessionId });
+      } catch (e) {
+        result = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      toolCallLog.push({ name: tu.name, args: tu.input, result });
+      send(`data: ${JSON.stringify({ type: 'tool_result', tool: tu.name, result: result.slice(0, 500) })}\n\n`);
+      toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: result });
+    }
+    convMessages.push({ role: 'user', content: toolResults });
+  }
+}
+
+// ── GitHub Models fallback (used when Gemini is down) ────────────────────────
+async function tryGithubModelsFallback(system: string, messages: { role: string; content: string }[], token: string): Promise<string | null> {
+  if (!token) return null;
+  try {
+    const res = await fetch('https://models.github.ai/inference/chat/completions', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        model:    'gpt-4o-mini',
+        messages: [{ role: 'system', content: system }, ...messages.map(m => ({ role: m.role, content: m.content }))],
+        max_tokens: 4096,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content ?? null;
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tool Executor
+// ═══════════════════════════════════════════════════════════════════════════════
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -445,32 +732,19 @@ async function executeTool(
 ): Promise<string> {
   const { githubToken, sessionId } = ctx;
 
-  // ── GitHub tools ─────────────────────────────────────────────────────────
   if (name === 'list_github_directory') {
-    const res = await githubApiCall(
-      `/repos/${String(args.repo ?? '')}/contents/${String(args.path ?? '')}`,
-      githubToken,
-    );
+    const res = await githubApiCall(`/repos/${String(args.repo ?? '')}/contents/${String(args.path ?? '')}`, githubToken);
     if (!res.ok) return `GitHub error: ${res.status}`;
     const data = await res.json();
-    if (Array.isArray(data)) {
-      return data.map((f: { name: string; type: string; size: number }) =>
-        `${f.type === 'dir' ? '📁' : '📄'} ${f.name} (${f.type}${f.type === 'file' ? `, ${f.size}B` : ''})`
-      ).join('\n');
-    }
+    if (Array.isArray(data)) return data.map((f: { name: string; type: string; size: number }) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name} (${f.type}${f.type === 'file' ? `, ${f.size}B` : ''})`).join('\n');
     return JSON.stringify(data).slice(0, 2000);
   }
 
   if (name === 'read_github_file') {
-    const res = await githubApiCall(
-      `/repos/${String(args.repo)}/contents/${String(args.path)}${args.ref ? `?ref=${args.ref}` : ''}`,
-      githubToken,
-    );
+    const res = await githubApiCall(`/repos/${String(args.repo)}/contents/${String(args.path)}${args.ref ? `?ref=${args.ref}` : ''}`, githubToken);
     if (!res.ok) return `GitHub error: ${res.status} - ${await res.text()}`;
     const data = await res.json();
-    const content = data.content
-      ? Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8')
-      : '';
+    const content = data.content ? Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8') : '';
     return `SHA: ${data.sha}\n\n${content.slice(0, 20000)}`;
   }
 
@@ -481,25 +755,14 @@ async function executeTool(
     };
     if (args.sha)    body.sha    = String(args.sha);
     if (args.branch) body.branch = String(args.branch);
-
-    const res = await githubApiCall(
-      `/repos/${String(args.repo)}/contents/${String(args.path)}`,
-      githubToken,
-      'PUT',
-      body,
-    );
+    const res  = await githubApiCall(`/repos/${String(args.repo)}/contents/${String(args.path)}`, githubToken, 'PUT', body);
     const data = await res.json();
     if (!res.ok) return `GitHub write error: ${res.status} — ${data.message ?? JSON.stringify(data)}`;
     return `✅ File written: ${data.content?.html_url ?? String(args.path)}`;
   }
 
   if (name === 'delete_github_file') {
-    const res = await githubApiCall(
-      `/repos/${String(args.repo)}/contents/${String(args.path)}`,
-      githubToken,
-      'DELETE',
-      { message: String(args.message ?? 'Delete via AI agent'), sha: String(args.sha ?? '') },
-    );
+    const res = await githubApiCall(`/repos/${String(args.repo)}/contents/${String(args.path)}`, githubToken, 'DELETE', { message: String(args.message ?? 'Delete via AI agent'), sha: String(args.sha ?? '') });
     return res.ok ? `✅ Deleted: ${String(args.path)}` : `Delete error: ${res.status}`;
   }
 
@@ -513,104 +776,53 @@ async function executeTool(
   }
 
   if (name === 'create_github_branch') {
-    // Get SHA of source branch
     const fromBranch = String(args.from_branch ?? 'main');
-    const refRes = await githubApiCall(
-      `/repos/${String(args.repo)}/git/ref/heads/${fromBranch}`,
-      githubToken,
-    );
+    const refRes = await githubApiCall(`/repos/${String(args.repo)}/git/ref/heads/${fromBranch}`, githubToken);
     if (!refRes.ok) return `Could not get ref: ${refRes.status}`;
     const refData = await refRes.json();
     const sha = refData.object?.sha;
-    const res = await githubApiCall(
-      `/repos/${String(args.repo)}/git/refs`,
-      githubToken,
-      'POST',
-      { ref: `refs/heads/${String(args.branch)}`, sha },
-    );
+    const res = await githubApiCall(`/repos/${String(args.repo)}/git/refs`, githubToken, 'POST', { ref: `refs/heads/${String(args.branch)}`, sha });
     return res.ok ? `✅ Branch '${String(args.branch)}' created from '${fromBranch}'` : `Branch error: ${res.status}`;
   }
 
   if (name === 'create_github_pr') {
-    const res = await githubApiCall(
-      `/repos/${String(args.repo)}/pulls`,
-      githubToken,
-      'POST',
-      {
-        title: String(args.title ?? 'AI Agent PR'),
-        head:  String(args.head),
-        base:  String(args.base ?? 'main'),
-        body:  String(args.body ?? ''),
-      },
-    );
+    const res  = await githubApiCall(`/repos/${String(args.repo)}/pulls`, githubToken, 'POST', { title: String(args.title ?? 'AI Agent PR'), head: String(args.head), base: String(args.base ?? 'main'), body: String(args.body ?? '') });
     const data = await res.json();
     return res.ok ? `✅ PR created: ${data.html_url}` : `PR error: ${res.status} — ${data.message}`;
   }
 
-  // ── MCP tools ─────────────────────────────────────────────────────────────
   if (name === 'mcp_fetch_url') {
-    const mcpRes = await fetch('/api/mcp', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ tool: 'mcp_fetch_url', arguments: args }),
-      signal:  AbortSignal.timeout(TOOL_TIMEOUT_MS),
-    });
+    const mcpRes = await fetch('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'mcp_fetch_url', arguments: args }), signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
     const data = await mcpRes.json();
     return data.result ?? data.error ?? 'No result';
   }
 
-  if (name === 'mcp_remember') {
-    _agentMemory[String(args.key)] = String(args.value);
-    return `Remembered: ${String(args.key)} = ${String(args.value).slice(0, 100)}`;
-  }
+  if (name === 'mcp_remember') { _agentMemory[String(args.key)] = String(args.value); return `Remembered: ${String(args.key)}`; }
+  if (name === 'mcp_recall')   { const val = _agentMemory[String(args.key)]; return val !== undefined ? val : `No memory for key: ${String(args.key)}`; }
 
-  if (name === 'mcp_recall') {
-    const val = _agentMemory[String(args.key)];
-    return val !== undefined ? val : `No memory found for key: ${String(args.key)}`;
-  }
-
-  // ── CLI tools ─────────────────────────────────────────────────────────────
   if (name === 'run_cli_command') {
     const cmd = String(args.command ?? '');
-    // Security: block dangerous commands
     const BLOCKED = ['rm -rf', 'sudo', 'chmod 777', 'curl | sh', 'wget | sh', '> /dev/'];
-    if (BLOCKED.some(b => cmd.includes(b))) {
-      return `❌ Blocked: dangerous command pattern detected`;
-    }
+    if (BLOCKED.some(b => cmd.includes(b))) return `❌ Blocked: dangerous command pattern`;
     const ALLOWED_PREFIXES = ['git ', 'npm ', 'npx ', 'node ', 'ls ', 'cat ', 'echo ', 'pwd', 'find ', 'grep ', 'wc '];
-    if (!ALLOWED_PREFIXES.some(p => cmd.startsWith(p))) {
-      return `❌ Blocked: only git/npm/npx/node/ls/cat commands are allowed`;
-    }
+    if (!ALLOWED_PREFIXES.some(p => cmd.startsWith(p))) return `❌ Blocked: only git/npm/npx/node/ls/cat commands are allowed`;
     try {
       const { stdout, stderr } = await execAsync(cmd, { timeout: TOOL_TIMEOUT_MS });
       return (stdout + (stderr ? `\nSTDERR: ${stderr}` : '')).slice(0, 5000);
     } catch (e) {
-      const err = e as { message: string; stdout?: string; stderr?: string };
+      const err = e as { message: string; stderr?: string };
       return `Command failed: ${err.message}\n${err.stderr ?? ''}`.slice(0, 2000);
     }
   }
 
-  // ── Supabase tools ────────────────────────────────────────────────────────
   if (name === 'execute_supabase_sql' || name === 'list_supabase_tables') {
-    // Proxy through the Supabase management API
-    const sbRes = await fetch('/api/supabase/auth', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: name, ...args }),
-      signal:  AbortSignal.timeout(TOOL_TIMEOUT_MS),
-    });
+    const sbRes = await fetch('/api/supabase/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: name, ...args }), signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
     const data = await sbRes.json();
     return JSON.stringify(data).slice(0, 3000);
   }
 
-  // ── Vercel tools ──────────────────────────────────────────────────────────
   if (name.startsWith('list_vercel') || name.startsWith('get_vercel') || name.startsWith('trigger_vercel')) {
-    const vcRes = await fetch('/api/vercel/auth', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action: name, ...args }),
-      signal:  AbortSignal.timeout(TOOL_TIMEOUT_MS),
-    });
+    const vcRes = await fetch('/api/vercel/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: name, ...args }), signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
     const data = await vcRes.json();
     return JSON.stringify(data).slice(0, 3000);
   }
@@ -619,56 +831,13 @@ async function executeTool(
 }
 
 // ── GitHub API helper ─────────────────────────────────────────────────────────
-function githubApiCall(
-  path: string,
-  token: string,
-  method = 'GET',
-  body?: object,
-): Promise<Response> {
+function githubApiCall(path: string, token: string, method = 'GET', body?: object): Promise<Response> {
   const headers: Record<string, string> = {
-    Accept:       'application/vnd.github+json',
+    Accept: 'application/vnd.github+json',
     'User-Agent': 'MonicaAgentStudio/2.0',
     'X-GitHub-Api-Version': '2022-11-28',
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (body)  headers['Content-Type']  = 'application/json';
-
-  return fetch(`https://api.github.com${path}`, {
-    method,
-    headers,
-    body:   body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(TOOL_TIMEOUT_MS),
-  });
-}
-
-// ── GitHub Models fallback ────────────────────────────────────────────────────
-async function tryGithubModelsFallback(
-  system: string,
-  messages: { role: string; content: string }[],
-  token: string,
-): Promise<string | null> {
-  if (!token) return null;
-  try {
-    const res = await fetch('https://models.github.ai/inference/chat/completions', {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        Authorization:   `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        model:    'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: system },
-          ...messages.map(m => ({ role: m.role, content: m.content })),
-        ],
-        max_tokens: 4096,
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content ?? null;
-  } catch {
-    return null;
-  }
+  return fetch(`https://api.github.com${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(TOOL_TIMEOUT_MS) });
 }
