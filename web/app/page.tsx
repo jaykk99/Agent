@@ -930,6 +930,22 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
                 <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
               </optgroup>
+              <optgroup label="☁️ OpenRouter — Cloud gateway (200+ models, needs OPENROUTER_API_KEY)">
+                <option value="openai/gpt-4o">GPT-4o via OpenRouter</option>
+                <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet via OpenRouter</option>
+                <option value="google/gemini-2.5-flash">Gemini 2.5 Flash via OpenRouter</option>
+                <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B via OpenRouter</option>
+                <option value="deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
+                <option value="mistralai/mistral-large">Mistral Large via OpenRouter</option>
+                <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 72B via OpenRouter</option>
+              </optgroup>
+              <optgroup label="🖥️ HuggingFace — Open-weights (self-hostable, needs HF_TOKEN)">
+                <option value="meta-llama/Meta-Llama-3.1-70B-Instruct">⚡ Llama 3.1 70B (HF)</option>
+                <option value="meta-llama/Llama-3.2-11B-Vision-Instruct">Llama 3.2 11B Vision (HF)</option>
+                <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B (HF)</option>
+                <option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B (HF)</option>
+                <option value="microsoft/Phi-3.5-mini-instruct">Phi-3.5 Mini (HF)</option>
+              </optgroup>
               <optgroup label="── HuggingFace (add HF token below)">
                 <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option>
                 <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B</option>
