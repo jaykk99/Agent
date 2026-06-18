@@ -64,6 +64,20 @@ export const SUPPORTED_MODELS = [
   { id: 'llama-3.1-8b-instant',      label: 'Llama 3.1 8B (Groq)',     provider: 'groq',      tier: 'fast',    toolUse: false },
   { id: 'mixtral-8x7b-32768',        label: 'Mixtral 8x7B (Groq)',     provider: 'groq',      tier: 'fast',    toolUse: false },
   { id: 'deepseek-r1-distill-llama-70b', label: 'DeepSeek R1 (Groq)', provider: 'groq',      tier: 'reason',  toolUse: false },
+  // OpenRouter (cloud gateway — 200+ models)
+  { id: 'openai/gpt-4o',                  label: 'GPT-4o (OpenRouter)',          provider: 'openrouter', tier: 'smart',  toolUse: false },
+  { id: 'anthropic/claude-3.5-sonnet',    label: 'Claude 3.5 Sonnet (OR)',        provider: 'openrouter', tier: 'smart',  toolUse: false },
+  { id: 'google/gemini-2.5-flash',        label: 'Gemini 2.5 Flash (OR)',         provider: 'openrouter', tier: 'fast',   toolUse: false },
+  { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B (OR)',        provider: 'openrouter', tier: 'fast',   toolUse: false },
+  { id: 'deepseek/deepseek-r1',           label: 'DeepSeek R1 (OR)',              provider: 'openrouter', tier: 'reason', toolUse: false },
+  { id: 'mistralai/mistral-large',        label: 'Mistral Large (OR)',            provider: 'openrouter', tier: 'smart',  toolUse: false },
+  { id: 'qwen/qwen-2.5-72b-instruct',     label: 'Qwen 2.5 72B (OR)',            provider: 'openrouter', tier: 'fast',   toolUse: false },
+  // HuggingFace Inference API (open-weights — local-capable)
+  { id: 'meta-llama/Meta-Llama-3.1-70B-Instruct',     label: 'Llama 3.1 70B (HF)',      provider: 'huggingface', tier: 'smart',  toolUse: false },
+  { id: 'meta-llama/Llama-3.2-11B-Vision-Instruct',   label: 'Llama 3.2 11B Vision (HF)', provider: 'huggingface', tier: 'fast', toolUse: false },
+  { id: 'mistralai/Mistral-7B-Instruct-v0.3',         label: 'Mistral 7B (HF)',          provider: 'huggingface', tier: 'fast',   toolUse: false },
+  { id: 'Qwen/Qwen2.5-72B-Instruct',                  label: 'Qwen 2.5 72B (HF)',        provider: 'huggingface', tier: 'smart',  toolUse: false },
+  { id: 'microsoft/Phi-3.5-mini-instruct',             label: 'Phi-3.5 Mini (HF)',        provider: 'huggingface', tier: 'fast',   toolUse: false },
 ] as const;
 
 type ModelEntry = typeof SUPPORTED_MODELS[number];
@@ -74,7 +88,8 @@ function getModelMeta(rawId: string): ModelEntry {
   let modelId = rawId;
   let forceProvider: Provider | null = null;
   if (rawId.startsWith('gh:'))  { modelId = rawId.slice(3);  forceProvider = 'github'; }
-  if (rawId.startsWith('hf:'))  { modelId = rawId.slice(3);  forceProvider = 'github'; } // route HF through GitHub Models fallback
+  if (rawId.startsWith('or:'))  { modelId = rawId.slice(3);  forceProvider = 'openrouter'; }
+  if (rawId.startsWith('hf:'))  { modelId = rawId.slice(3);  forceProvider = 'huggingface'; }
   if (rawId.startsWith('ant:')) { modelId = rawId.slice(4);  forceProvider = 'anthropic'; }
   if (rawId.startsWith('gr:'))  { modelId = rawId.slice(3);  forceProvider = 'groq'; }
 
@@ -88,6 +103,7 @@ function getModelMeta(rawId: string): ModelEntry {
      modelId.startsWith('claude')  ? 'anthropic' :
      modelId.startsWith('llama') || modelId.startsWith('mixtral') || modelId.startsWith('deepseek') ? 'groq' :
      modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4') ? 'github' :
+     modelId.includes('/') && !modelId.startsWith('gemini') ? 'openrouter' :
      'gemini');
 
   return { id: modelId, label: modelId, provider: inferredProvider, tier: 'fast', toolUse: inferredProvider !== 'groq' };
@@ -243,7 +259,9 @@ export async function POST(req: NextRequest) {
   const geminiKey    = (settings.custom_gemini_api_key  as string | undefined) || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_KEY || '';
   const openaiKey    = (settings.openai_api_key         as string | undefined) || process.env.OPENAI_API_KEY || '';
   const anthropicKey = (settings.anthropic_api_key      as string | undefined) || process.env.ANTHROPIC_API_KEY || '';
-  const groqKey      = (settings.groq_api_key           as string | undefined) || process.env.GROQ_API_KEY || '';
+  const groqKey        = (settings.groq_api_key           as string | undefined) || process.env.GROQ_API_KEY || '';
+  const openrouterKey  = (settings.openrouter_api_key     as string | undefined) || process.env.OPENROUTER_API_KEY || '';
+  const hfToken        = (settings.hf_token               as string | undefined) || process.env.HF_TOKEN || '';
   const githubToken  = (settings.github_token           as string | undefined) || process.env.GITHUB_TOKEN || '';
 
   const rawModelName = (settings.active_model_name as string | undefined) || (settings.model as string | undefined) || 'gemini-2.5-flash';
@@ -362,7 +380,7 @@ export async function POST(req: NextRequest) {
           // openai / github / groq — all OpenAI-compatible
           await runOpenAICompatLoop({
             send, messages, systemPrompt, modelMeta,
-            openaiKey, githubToken, groqKey, allowedCategories,
+            openaiKey, githubToken, groqKey, openrouterKey, hfToken, allowedCategories,
             execState, sessionId, activeRole, activeSkills, toolCallLog,
           });
         }
@@ -522,8 +540,9 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
 // ── OpenAI-compatible loop (OpenAI / GitHub Models / Groq) ────────────────────
 async function runOpenAICompatLoop(ctx: LoopCtx & {
   modelMeta: ModelEntry; openaiKey: string; githubToken: string; groqKey: string;
+  openrouterKey: string; hfToken: string;
 }) {
-  const { send, messages, systemPrompt, modelMeta, openaiKey, githubToken, groqKey, allowedCategories, execState, toolCallLog } = ctx;
+  const { send, messages, systemPrompt, modelMeta, openaiKey, githubToken, groqKey, openrouterKey, hfToken, allowedCategories, execState, toolCallLog } = ctx;
 
   // Determine base URL + key
   let baseUrl: string;
@@ -535,6 +554,12 @@ async function runOpenAICompatLoop(ctx: LoopCtx & {
   } else if (modelMeta.provider === 'groq') {
     baseUrl = 'https://api.groq.com/openai/v1';
     apiKey  = groqKey;
+  } else if (modelMeta.provider === 'openrouter') {
+    baseUrl = 'https://openrouter.ai/api/v1';
+    apiKey  = openrouterKey;
+  } else if (modelMeta.provider === 'huggingface') {
+    baseUrl = 'https://api-inference.huggingface.co/v1';
+    apiKey  = hfToken;
   } else {
     // openai
     baseUrl = 'https://api.openai.com/v1';
