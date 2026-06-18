@@ -310,10 +310,11 @@ export default function Home() {
 
       const params = new URLSearchParams(window.location.search);
       const oauthError = params.get('error');
-      const ghToken  = params.get('gh_token');
-      const ghUser   = params.get('gh_user');
-      const ghAvatar = params.get('gh_avatar');
-      const ghEmail  = params.get('gh_email');
+      const ghToken   = params.get('gh_token');
+      const ghUser    = params.get('gh_user');
+      const ghAvatar  = params.get('gh_avatar');
+      const ghEmail   = params.get('gh_email');
+      const ghCtxB64  = params.get('gh_context');
       const sbToken  = params.get('sb_token');
       const sbUser   = params.get('sb_user');
       const vrToken  = params.get('vr_token');
@@ -324,7 +325,9 @@ export default function Home() {
 
       let merged: AppSettings | null = null;
       if (ghToken && ghUser) {
-        merged = { ...current, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true };
+        let ghContext: Record<string,unknown> | undefined;
+        if (ghCtxB64) { try { ghContext = JSON.parse(atob(ghCtxB64)); } catch { /* ignore */ } }
+        merged = { ...current, github_token: ghToken, github_username: ghUser, github_avatar_url: ghAvatar || '', is_github_connected: true, ...(ghContext ? { github_context: ghContext } : {}) };
         if (ghUser) setSignedInUser({ email: ghEmail || '', name: ghUser, avatar: ghAvatar || '' });
         setTab('chat');
       } else if (sbToken && sbUser) {
