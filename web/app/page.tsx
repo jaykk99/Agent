@@ -877,6 +877,17 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
             <label className="text-xs text-gray-400 mb-1 block">Active Model</label>
             <select value={local.active_model_name} onChange={e => setLocal(s => ({ ...s, active_model_name: e.target.value }))}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
+              <optgroup label="── Anthropic Claude (server key active)">
+                <option value="claude-3-5-sonnet-20241022">✨ Claude 3.5 Sonnet — Best quality</option>
+                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku — Fast</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5 — Most powerful</option>
+              </optgroup>
+              <optgroup label="── Groq (ultra-fast open source · server key active)">
+                <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B (Groq) — Best open source</option>
+                <option value="llama-3.1-8b-instant">Llama 3.1 8B (Groq) — Fastest</option>
+                <option value="mixtral-8x7b-32768">Mixtral 8x7B (Groq)</option>
+                <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 70B (Groq) — Reasoning</option>
+              </optgroup>
               <optgroup label="── GitHub Models (free · connect GitHub first)">
                 <option value="gh:gpt-4.1">🔥 GPT-4.1 — Smartest (free)</option>
                 <option value="gh:gpt-4.1-mini">GPT-4.1 Mini — Fast &amp; Smart (free)</option>
@@ -903,7 +914,7 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
                 <option value="hf:DavidAU/Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking">Qwen3.6 40B Uncensored</option>
               </optgroup>
             </select>
-            <p className="text-xs text-gray-600 mt-1">GitHub Models are free — just connect GitHub in the Connect tab first. Full tool loop on all models.</p>
+            <p className="text-xs text-gray-600 mt-1">Claude &amp; Groq keys active on server. GitHub Models are free — connect GitHub first.</p>
           </div>
 
           {!local.is_custom_gemini_key_enabled && (
