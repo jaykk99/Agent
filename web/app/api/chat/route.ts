@@ -38,6 +38,7 @@ const SUMMARY_PROMPT   = 'Summarise EVERYTHING you found and did: every file rea
 // ── In-process memory ────────────────────────────────────────────────────────
 const _agentMemory: Record<string, string> = {};
 let _estimatedTokens = 0;
+let _lastText = '';          // last assistant text turn — included in 'done' for frontend
 
 // ── Supported models registry ────────────────────────────────────────────────
 export const SUPPORTED_MODELS = [
@@ -68,9 +69,28 @@ export const SUPPORTED_MODELS = [
 type ModelEntry = typeof SUPPORTED_MODELS[number];
 type Provider = ModelEntry['provider'];
 
-function getModelMeta(modelId: string): ModelEntry {
-  return (SUPPORTED_MODELS.find(m => m.id === modelId) as ModelEntry | undefined) ??
-    { id: modelId, label: modelId, provider: 'gemini' as Provider, tier: 'fast', toolUse: true };
+function getModelMeta(rawId: string): ModelEntry {
+  // Strip provider prefixes the frontend may attach
+  let modelId = rawId;
+  let forceProvider: Provider | null = null;
+  if (rawId.startsWith('gh:'))  { modelId = rawId.slice(3);  forceProvider = 'github'; }
+  if (rawId.startsWith('hf:'))  { modelId = rawId.slice(3);  forceProvider = 'github'; } // route HF through GitHub Models fallback
+  if (rawId.startsWith('ant:')) { modelId = rawId.slice(4);  forceProvider = 'anthropic'; }
+  if (rawId.startsWith('gr:'))  { modelId = rawId.slice(3);  forceProvider = 'groq'; }
+
+  const found = SUPPORTED_MODELS.find(m => m.id === modelId) as ModelEntry | undefined;
+  if (found) return forceProvider ? { ...found, provider: forceProvider } : found;
+
+  // Unknown model — infer provider from name patterns
+  const inferredProvider: Provider =
+    forceProvider ??
+    (modelId.startsWith('gemini')  ? 'gemini'    :
+     modelId.startsWith('claude')  ? 'anthropic' :
+     modelId.startsWith('llama') || modelId.startsWith('mixtral') || modelId.startsWith('deepseek') ? 'groq' :
+     modelId.startsWith('gpt') || modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('o4') ? 'github' :
+     'gemini');
+
+  return { id: modelId, label: modelId, provider: inferredProvider, tier: 'fast', toolUse: inferredProvider !== 'groq' };
 }
 
 // ── Tool Schema Registry ─────────────────────────────────────────────────────
@@ -356,6 +376,7 @@ export async function POST(req: NextRequest) {
 
         send(`data: ${JSON.stringify({
           type: 'done',
+          text: _lastText || undefined,
           model: modelMeta.id,
           provider: modelMeta.provider,
           role: activeRole,
@@ -430,7 +451,7 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
       // Fallback to GitHub Models gpt-4o-mini
       const fallback = await tryGithubModelsFallback(systemPrompt, messages, githubToken);
       if (fallback) {
-        send(`data: ${JSON.stringify({ type: 'text', content: fallback })}\n\n`);
+        send(`data: ${JSON.stringify({ type: 'text', text: fallback })}\n\n`);
       } else {
         const errText = await geminiRes.text().catch(() => '');
         send(`data: ${JSON.stringify({ type: 'error', content: `Gemini ${geminiRes.status}: ${errText.slice(0, 200)}` })}\n\n`);
@@ -462,7 +483,7 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
         break;
       }
       for (const chunk of textThisTurn.split(/(?<=\n)/)) {
-        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        send(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`); _lastText += chunk;
         await new Promise(r => setTimeout(r, 0));
       }
     }
@@ -478,7 +499,7 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
     const toolResults: object[] = [];
 
     for (const call of functionCalls) {
-      send(`data: ${JSON.stringify({ type: 'tool_call', tool: call.name, args: call.args })}\n\n`);
+      send(`data: ${JSON.stringify({ type: 'tool_start', tool: call.name, args: call.args })}\n\n`);
       let result = '';
       try {
         result = await executeTool(call.name, call.args, { githubToken, sessionId: ctx.sessionId });
@@ -579,7 +600,7 @@ async function runOpenAICompatLoop(ctx: LoopCtx & {
         break;
       }
       for (const chunk of msg.content.split(/(?<=\n)/)) {
-        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        send(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`); _lastText += chunk;
         await new Promise(r => setTimeout(r, 0));
       }
     }
@@ -594,7 +615,7 @@ async function runOpenAICompatLoop(ctx: LoopCtx & {
       let callArgs: Record<string, unknown> = {};
       try { callArgs = JSON.parse(tc.function?.arguments ?? '{}'); } catch { /* noop */ }
 
-      send(`data: ${JSON.stringify({ type: 'tool_call', tool: callName, args: callArgs })}\n\n`);
+      send(`data: ${JSON.stringify({ type: 'tool_start', tool: callName, args: callArgs })}\n\n`);
       let result = '';
       try {
         result = await executeTool(callName, callArgs, { githubToken, sessionId: ctx.sessionId });
@@ -676,7 +697,7 @@ async function runAnthropicLoop(ctx: LoopCtx & { modelName: string; anthropicKey
         break;
       }
       for (const chunk of textOutput.split(/(?<=\n)/)) {
-        send(`data: ${JSON.stringify({ type: 'text', content: chunk })}\n\n`);
+        send(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`); _lastText += chunk;
         await new Promise(r => setTimeout(r, 0));
       }
     }
@@ -687,7 +708,7 @@ async function runAnthropicLoop(ctx: LoopCtx & { modelName: string; anthropicKey
     const toolResults = [];
 
     for (const tu of toolUseBlocks) {
-      send(`data: ${JSON.stringify({ type: 'tool_call', tool: tu.name, args: tu.input })}\n\n`);
+      send(`data: ${JSON.stringify({ type: 'tool_start', tool: tu.name, args: tu.input })}\n\n`);
       let result = '';
       try {
         result = await executeTool(tu.name, tu.input, { githubToken: ctx.sessionId, sessionId: ctx.sessionId });
