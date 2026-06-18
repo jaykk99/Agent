@@ -326,6 +326,13 @@ export async function POST(req: NextRequest) {
       : '',
   ].filter(Boolean).join('\n');
 
+  // Inject GitHub context so agent knows the user's repos
+  const ghContext = settings.github_context as Record<string,unknown> | undefined;
+  const githubCtxBlock = ghContext?.repos
+    ? `\n\n── GitHub Account: ${settings.github_username ?? 'unknown'} ──\nRepositories (${(ghContext.repos as unknown[]).length}): ${(ghContext.repos as Array<{name:string;description:string|null;language:string|null;private:boolean}>).map(r => `${r.private?'🔒':'📦'} ${r.name}${r.language ? ` [${r.language}]` : ''}${r.description ? ` — ${r.description}` : ''}`).join(', ')}`
+    : '';
+  const systemPromptWithCtx = systemPrompt + githubCtxBlock;
+
   // ── Agent role → allowed tool categories ─────────────────────────────────
   const roleCategories: Record<string, string[]> = {
     architect:  ['github', 'mcp', 'cli'],
@@ -366,20 +373,20 @@ export async function POST(req: NextRequest) {
         // ── Dispatch to the right provider loop ──────────────────────────
         if (modelMeta.provider === 'gemini') {
           await runGeminiLoop({
-            send, messages, systemPrompt, modelName: modelMeta.id,
+            send, messages, systemPrompt: systemPromptWithCtx, modelName: modelMeta.id,
             geminiKey, githubToken, allowedCategories,
             execState, sessionId, activeRole, activeSkills, toolCallLog,
           });
         } else if (modelMeta.provider === 'anthropic') {
           await runAnthropicLoop({
-            send, messages, systemPrompt, modelName: modelMeta.id,
+            send, messages, systemPrompt: systemPromptWithCtx, modelName: modelMeta.id,
             anthropicKey, allowedCategories,
             execState, sessionId, activeRole, activeSkills, toolCallLog,
           });
         } else {
           // openai / github / groq — all OpenAI-compatible
           await runOpenAICompatLoop({
-            send, messages, systemPrompt, modelMeta,
+            send, messages, systemPrompt: systemPromptWithCtx, modelMeta,
             openaiKey, githubToken, groqKey, openrouterKey, hfToken, allowedCategories,
             execState, sessionId, activeRole, activeSkills, toolCallLog,
           });
@@ -437,6 +444,30 @@ interface LoopCtx {
   toolCallLog: { name: string; args: Record<string, unknown>; result?: string }[];
 }
 
+// Persist tool calls to agent_messages so they survive the session
+async function saveToolCallsToDb(
+  sessionId: string,
+  toolCallLog: { name: string; args: Record<string, unknown>; result?: string }[],
+  model: string,
+  role: string,
+): Promise<void> {
+  if (!toolCallLog.length) return;
+  try {
+    const { getSupabase } = await import('@/lib/supabase');
+    const sb = getSupabase();
+    await sb.from('agent_messages').insert({
+      session_id: sessionId,
+      role: 'assistant',
+      content: `[Tool calls: ${toolCallLog.map(t => t.name).join(', ')}]`,
+      tool_calls: JSON.stringify(toolCallLog),
+      model,
+      agent_role: role,
+    });
+  } catch (e) {
+    console.warn('saveToolCallsToDb error:', e instanceof Error ? e.message : e);
+  }
+}
+
 // ── Gemini loop ───────────────────────────────────────────────────────────────
 async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: string; githubToken: string }) {
   const { send, messages, systemPrompt, modelName, geminiKey, githubToken, allowedCategories, execState, toolCallLog } = ctx;
@@ -481,7 +512,11 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
     if (geminiData.usageMetadata) _estimatedTokens = geminiData.usageMetadata.totalTokenCount ?? _estimatedTokens;
 
     const candidate = geminiData.candidates?.[0];
-    if (!candidate) { send(`data: ${JSON.stringify({ type: 'error', content: 'No response from Gemini.' })}\n\n`); break; }
+    if (!candidate) {
+      if (turns === 1) { conversationMessages.push({ role: 'user', parts: [{ text: 'Please respond.' }] } as never); continue; }
+      send(`data: ${JSON.stringify({ type: 'error', content: 'No response from Gemini. Try switching models.' })}\n\n`);
+      break;
+    }
 
     const parts        = candidate.content?.parts ?? [];
     let textThisTurn   = '';
@@ -530,6 +565,7 @@ async function runGeminiLoop(ctx: LoopCtx & { modelName: string; geminiKey: stri
       send(`data: ${JSON.stringify({ type: 'tool_result', tool: call.name, result: result.slice(0, 500) })}\n\n`);
       toolResults.push({ functionResponse: { name: call.name, response: { content: result } } });
     }
+    await saveToolCallsToDb(ctx.sessionId, toolCallLog, ctx.modelName, ctx.activeRole);
     conversationMessages.push({ role: 'user', parts: toolResults } as never);
   }
 
@@ -613,7 +649,15 @@ async function runOpenAICompatLoop(ctx: LoopCtx & {
 
     const choice  = data.choices?.[0];
     const msg     = choice?.message;
-    if (!msg) { send(`data: ${JSON.stringify({ type: 'error', content: 'No response from model.' })}\n\n`); break; }
+    if (!msg) {
+      // Retry once with a nudge before giving up
+      if (turns === 1) {
+        convMessages.push({ role: 'user', content: 'Please respond to the last message.' });
+        continue;
+      }
+      send(`data: ${JSON.stringify({ type: 'error', content: 'No response from model. Try a different model or rephrase your request.' })}\n\n`);
+      break;
+    }
 
     // Text content
     if (msg.content) {
@@ -652,6 +696,8 @@ async function runOpenAICompatLoop(ctx: LoopCtx & {
       convMessages.push({ role: 'tool', tool_call_id: tc.id, name: callName, content: result });
     }
   }
+  // Persist tool calls to DB after loop completes
+  await saveToolCallsToDb(ctx.sessionId, toolCallLog, modelMeta.id, ctx.activeRole);
 }
 
 // ── Anthropic Claude loop ─────────────────────────────────────────────────────
