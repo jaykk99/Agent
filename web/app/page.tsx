@@ -15,6 +15,8 @@ interface Message {
   is_user: boolean;
   status?: string;
   model?: string;
+  provider?: string;
+  agent_role?: string;
   tool_calls?: ToolCallRecord[];
   api_call_url?: string;
   api_call_response?: string;
@@ -269,9 +271,17 @@ function MessageBubble({ msg, idx, onDelete, onCopy, copied }: {
               dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.text) }}
             />
           )}
-          {msg.model && (
-            <div className="mt-2 pt-2 border-t border-gray-700/40 text-xs text-gray-500 font-mono">
-              {msg.model}
+          {(msg.model || msg.provider || msg.agent_role) && (
+            <div className="mt-2 pt-2 border-t border-gray-700/40 flex items-center gap-2 flex-wrap">
+              {msg.agent_role && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/40 border border-purple-700/30 text-purple-300 font-medium capitalize">{msg.agent_role}</span>
+              )}
+              {msg.model && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700/40 text-indigo-300 font-mono">{shortModelLabel(msg.model)}</span>
+              )}
+              {msg.provider && (
+                <span className="text-[10px] text-gray-600 font-mono">{msg.provider}</span>
+              )}
             </div>
           )}
         </div>
@@ -527,6 +537,9 @@ export default function Home() {
         const toolCallsAccum: ToolCallRecord[] = [];
         let finalText = '';
         let streamingStarted = false;
+        let streamModel = '';
+        let streamProvider = '';
+        let streamRole = '';
 
         // Push a live placeholder immediately -- user sees output right away
         setMessages(prev => [...prev, { text: '', is_user: false, status: 'STREAMING', streaming: true }]);
@@ -544,7 +557,12 @@ export default function Home() {
             if (raw === '[DONE]') break;
             try {
               const chunk = JSON.parse(raw);
-              if (chunk.type === 'tool_start') {
+              if (chunk.type === 'routing') {
+                streamModel    = chunk.model    || streamModel;
+                streamProvider = chunk.provider || streamProvider;
+                streamRole     = chunk.role     || streamRole;
+                setThinkingStatus(`${chunk.role ? chunk.role + ' · ' : ''}${shortModelLabel(chunk.model || '')}…`);
+              } else if (chunk.type === 'tool_start') {
                 setThinkingStatus(`🔧 ${chunk.tool || chunk.name || 'tool'}...`);
                 toolCallsAccum.push({ name: chunk.tool || chunk.name, args: chunk.args || {}, result: '' });
               } else if (chunk.type === 'tool_result') {
@@ -556,12 +574,15 @@ export default function Home() {
                 if (!streamingStarted) { streamingStarted = true; setThinkingStatus(''); }
                 setMessages(prev => {
                   const updated = [...prev];
-                  const idx = updated.findLastIndex((m: Message) => m.streaming);
-                  if (idx >= 0) updated[idx] = { ...updated[idx], text: finalText };
+                  const lastStreamIdx = updated.map((m, i) => m.streaming ? i : -1).filter(i => i >= 0).pop() ?? -1;
+                  if (lastStreamIdx >= 0) updated[lastStreamIdx] = { ...updated[lastStreamIdx], text: finalText };
                   return updated;
                 });
               } else if (chunk.type === 'done') {
                 if (chunk.text && !finalText) finalText = chunk.text;
+                if (chunk.model)    streamModel    = chunk.model;
+                if (chunk.provider) streamProvider = chunk.provider;
+                if (chunk.role)     streamRole     = chunk.role;
               } else if (chunk.text) {
                 finalText = chunk.text;
               }
@@ -573,7 +594,10 @@ export default function Home() {
         setMessages(prev => prev.filter((m: Message) => !m.streaming));
         setThinkingStatus('Thinking...');
 
-        resp = { text: finalText, model: (resp as {model?: string})?.model, tool_calls: toolCallsAccum };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        resp = { text: finalText, model: streamModel || undefined, tool_calls: toolCallsAccum } as typeof resp;
+        (resp as unknown as Record<string, unknown>).provider   = streamProvider || undefined;
+        (resp as unknown as Record<string, unknown>).agent_role = streamRole || undefined;
       } else {
         // ── Standard JSON path ─────────────────────────────────────────
         resp = await chatRes.json();
@@ -596,7 +620,9 @@ export default function Home() {
         text: aiText,
         is_user: false,
         status: resp.error ? 'ERROR' : 'SUCCESS',
-        model: resp.model,
+        model:      resp.model,
+        provider:   (resp as Record<string, unknown>).provider as string | undefined,
+        agent_role: (resp as Record<string, unknown>).agent_role as string | undefined,
         tool_calls: resp.tool_calls || [],
       };
       setMessages(prev => [...prev, aiMsg]);
