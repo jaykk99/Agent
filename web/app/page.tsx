@@ -115,6 +115,46 @@ function escHtml(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+
+/* ─── Compact model label for inline picker ─────────── */
+function shortModelLabel(id: string): string {
+  const map: Record<string, string> = {
+    'claude-3-5-sonnet-20241022': '✨ Claude 3.5 Sonnet',
+    'claude-3-5-haiku-20241022':  'Claude 3.5 Haiku',
+    'claude-opus-4-5':            'Claude Opus 4.5',
+    'llama-3.3-70b-versatile':    '⚡ Llama 3.3 70B',
+    'llama-3.1-8b-instant':       'Llama 3.1 8B',
+    'mixtral-8x7b-32768':         'Mixtral 8x7B',
+    'deepseek-r1-distill-llama-70b': 'DeepSeek R1',
+    'gemini-2.5-pro':             'Gemini 2.5 Pro',
+    'gemini-2.5-flash':           'Gemini 2.5 Flash',
+    'gemini-2.5-flash-lite':      'Gemini 2.5 Flash Lite',
+    'gemini-2.0-flash':           'Gemini 2.0 Flash',
+    'gh:gpt-4.1':                 '🔥 GPT-4.1',
+    'gh:gpt-4.1-mini':            'GPT-4.1 Mini',
+    'gh:gpt-4.1-nano':            'GPT-4.1 Nano',
+    'gh:gpt-4o':                  'GPT-4o',
+    'gh:gpt-4o-mini':             'GPT-4o Mini',
+    'gh:llama-3.3-70b':           'Llama 3.3 (GH)',
+    'gh:llama-3.1-70b':           'Llama 3.1 (GH)',
+    'gh:mistral-large':           'Mistral Large (GH)',
+    'gh:phi-4':                   'Phi-4 (GH)',
+    'gh:deepseek-v3':             'DeepSeek V3 (GH)',
+    'openai/gpt-4o':              'GPT-4o (OR)',
+    'anthropic/claude-3.5-sonnet': 'Claude 3.5 (OR)',
+    'google/gemini-2.5-flash':    'Gemini 2.5 (OR)',
+    'meta-llama/llama-3.3-70b-instruct': 'Llama 3.3 (OR)',
+    'deepseek/deepseek-r1':       'DeepSeek R1 (OR)',
+    'mistralai/mistral-large':    'Mistral Large (OR)',
+    'qwen/qwen-2.5-72b-instruct': 'Qwen 2.5 (OR)',
+    'hf:Qwen/Qwen2.5-72B-Instruct': 'Qwen 2.5 (HF)',
+    'hf:meta-llama/Llama-3.1-70B-Instruct': 'Llama 3.1 (HF)',
+    'hf:mistralai/Mistral-7B-Instruct-v0.3': 'Mistral 7B (HF)',
+    'hf:google/gemma-2-27b-it':   'Gemma 2 27B (HF)',
+  };
+  return map[id] ?? id.split('/').pop()?.replace(/-/g,' ') ?? id;
+}
+
 /* ─── Tool Call Badge ───────────────────────────────── */
 function ToolCallBadge({ call }: { call: ToolCallRecord }) {
   const [open, setOpen] = useState(false);
@@ -706,6 +746,66 @@ export default function Home() {
 
             {/* Input area */}
             <div className="p-4 border-t border-gray-800/60 bg-gray-950/95">
+              {/* ── Inline model picker ── */}
+              <div className="flex items-center gap-2 mb-2">
+                <select
+                  value={settings.active_model_name}
+                  onChange={e => {
+                    const updated = { ...settings, active_model_name: e.target.value };
+                    setSettings(updated);
+                    saveSettings(updated);
+                  }}
+                  title="Switch model"
+                  className="bg-gray-800/80 border border-gray-700/50 rounded-full pl-3 pr-6 py-1 text-[11px] text-indigo-300 outline-none hover:border-indigo-600/60 cursor-pointer appearance-none focus:ring-1 focus:ring-indigo-600/50 transition-colors font-medium"
+                  style={{ backgroundImage: 'none' }}
+                >
+                  <optgroup label="── Anthropic Claude">
+                    <option value="claude-3-5-sonnet-20241022">✨ Claude 3.5 Sonnet</option>
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                    <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                  </optgroup>
+                  <optgroup label="── Groq (ultra-fast)">
+                    <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B (Groq)</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Groq)</option>
+                    <option value="mixtral-8x7b-32768">Mixtral 8x7B (Groq)</option>
+                    <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 (Groq)</option>
+                  </optgroup>
+                  <optgroup label="── GitHub Models (free)">
+                    <option value="gh:gpt-4.1">🔥 GPT-4.1 (free)</option>
+                    <option value="gh:gpt-4.1-mini">GPT-4.1 Mini (free)</option>
+                    <option value="gh:gpt-4.1-nano">GPT-4.1 Nano (free)</option>
+                    <option value="gh:gpt-4o">GPT-4o (free)</option>
+                    <option value="gh:gpt-4o-mini">GPT-4o Mini (free)</option>
+                    <option value="gh:llama-3.3-70b">Llama 3.3 70B (Meta, free)</option>
+                    <option value="gh:deepseek-v3">DeepSeek V3 (free)</option>
+                    <option value="gh:phi-4">Phi-4 (Microsoft, free)</option>
+                  </optgroup>
+                  <optgroup label="── Gemini">
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  </optgroup>
+                  <optgroup label="☁️ OpenRouter (200+ models)">
+                    <option value="openai/gpt-4o">GPT-4o via OpenRouter</option>
+                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 via OpenRouter</option>
+                    <option value="google/gemini-2.5-flash">Gemini 2.5 via OpenRouter</option>
+                    <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 via OpenRouter</option>
+                    <option value="deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
+                    <option value="mistralai/mistral-large">Mistral Large via OpenRouter</option>
+                    <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 via OpenRouter</option>
+                  </optgroup>
+                  <optgroup label="🖥️ HuggingFace">
+                    <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B (HF)</option>
+                    <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B (HF)</option>
+                    <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B (HF)</option>
+                    <option value="hf:google/gemma-2-27b-it">Gemma 2 27B (HF)</option>
+                  </optgroup>
+                </select>
+                <span className="text-[10px] text-gray-600">
+                  {shortModelLabel(settings.active_model_name)}
+                </span>
+              </div>
               {/* Context badges */}
               {(attachedRepo || settings.enable_web_search) && (
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -942,14 +1042,8 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
                 <option value="mistralai/mistral-large">Mistral Large via OpenRouter</option>
                 <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 72B via OpenRouter</option>
               </optgroup>
-              <optgroup label="🖥️ HuggingFace — Open-weights (self-hostable, needs HF_TOKEN)">
-                <option value="meta-llama/Meta-Llama-3.1-70B-Instruct">⚡ Llama 3.1 70B (HF)</option>
-                <option value="meta-llama/Llama-3.2-11B-Vision-Instruct">Llama 3.2 11B Vision (HF)</option>
-                <option value="mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B (HF)</option>
-                <option value="Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B (HF)</option>
-                <option value="microsoft/Phi-3.5-mini-instruct">Phi-3.5 Mini (HF)</option>
-              </optgroup>
-              <optgroup label="── HuggingFace (add HF token below)">
+
+              <optgroup label="🖥️ HuggingFace (add HF token in Settings)">
                 <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B</option>
                 <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B</option>
                 <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B</option>
