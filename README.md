@@ -165,12 +165,18 @@ export ELEVENLABS_API_KEY=sk_your_key_here
 
 A live status bar above chat messages shows:
 
-| Metric | Meaning |
+| Metric | Details |
 |---|---|
-| Context fill bar | Tokens used vs model max window — yellow > 50%, red > 80% |
-| Latency | Time from send → full response |
-| Device RAM | `navigator.deviceMemory` (browser API) |
-| ⚠ Warning | "Context almost full — start new chat" when > 80% |
+| **Context fill bar** | Tokens used vs model max window — yellow > 50%, red > 80% |
+| **Latency** | ⚡ Time from send → full response (ms or s) |
+| **CPU** | Core count via `navigator.hardwareConcurrency` |
+| **RAM** | Device memory via `navigator.deviceMemory` |
+| **Storage** | 💾 Used / total GB via `navigator.storage.estimate()` |
+| **Battery** | 🔋 Level % + charging state via `navigator.getBattery()` |
+| **⚠ Context full** | Fires at > 80% — "start a new chat" |
+| **⚠ Low battery** | Fires at ≤ 20% and not charging |
+
+> Metrics refresh every 3 seconds. Not all browsers expose every API (e.g. Firefox hides `deviceMemory`); missing values are simply hidden.
 
 ---
 
