@@ -9,7 +9,10 @@ set -e
 REPO_DIR="${JARVIS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 WEB_DIR="$REPO_DIR/web"
 VOICE_PY="$REPO_DIR/voice.py"
-LOG="$TMPDIR/jarvis.log"
+# Ensure log dir exists (Termux uses $TMPDIR; fallback to /tmp)
+_LOGDIR="${TMPDIR:-/tmp}"
+mkdir -p "$_LOGDIR" 2>/dev/null || true
+LOG="$_LOGDIR/jarvis.log"
 
 export ELEVENLABS_API_KEY="${ELEVENLABS_API_KEY:-sk_8b5331aa2f2aed79d405d9f5f24fdec1a87f2b6f45574abe}"
 
@@ -49,6 +52,7 @@ start_web() {
   export PORT="${PORT:-3000}"
   echo "[web] Running at http://localhost:$PORT"
   # Run in background, stream logs
+  mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
   npm run dev 2>&1 | tee "$LOG" &
   WEB_PID=$!
   echo "[web] PID=$WEB_PID  |  Log: $LOG"
