@@ -1,322 +1,245 @@
 <div align="center">
-  <h1>🤖 AI Agent Platform</h1>
-  <p><strong>Advanced AI-powered agent with Google AI Studio integration, Android support, and cross-platform deployment capabilities</strong></p>
-  
+  <h1>🤖 Jarvis — AI Agent Platform</h1>
+  <p><strong>Multi-model AI agent with voice (ElevenLabs), hardware monitor, live streaming, GitHub context injection, and cross-platform deployment</strong></p>
+
   <p>
     <a href="https://api-ai-agent.vercel.app">🌐 Live Demo</a> |
-    <a href="https://ai.studio/apps/917a1dbe-77db-4fc0-a0ac-24ae3874c86b">🔗 AI Studio</a> |
     <a href="#quick-start">⚡ Quick Start</a> |
-    <a href="#api-documentation">📚 API Docs</a>
+    <a href="#android-termux">📱 Android / Termux</a> |
+    <a href="#voice">🔊 Voice</a>
   </p>
-  
-  <img width="100%" alt="AI Agent Platform Banner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
 </div>
+
+---
 
 ## ✨ Features
 
-### 🎯 Core Capabilities
-- **🤖 Advanced AI Integration**: Google Gemini AI Studio integration with latest models
-- **📱 Android Native Support**: Full Android app with Kotlin/Java support
-- **🌐 Web Interface**: Modern TypeScript/React web application
-- **☁️ Cloud Deployment**: Vercel-ready with automatic deployments
-- **🔒 Secure Authentication**: Environment-based API key management
-- **⚡ Real-time Processing**: Fast response times and efficient processing
+| Feature | Details |
+|---|---|
+| 🧠 **Multi-model AI** | Claude, GPT-4, Gemini, Groq Llama, DeepSeek, Mistral, HuggingFace, OpenRouter (200+ models) |
+| 🔊 **ElevenLabs Voice** | Every AI response spoken aloud — toggle per session, six voices |
+| 📊 **Hardware Monitor** | Live context-fill bar + latency + device RAM displayed in chat |
+| ⚡ **Live Streaming** | Word-by-word SSE streaming with blinking cursor |
+| 🐙 **GitHub Injection** | Attach a repo → full tree injected as context |
+| 🛠️ **Tool Calls** | Persistent tool-call logs in Supabase |
+| 🔒 **Rate Limiting** | 20 req/60s per-IP token bucket |
+| ☁️ **Vercel Deploy** | Zero-config, one-command deployment |
 
-### 🏗️ Architecture
-- **Frontend**: TypeScript, React, Modern UI components
-- **Backend**: Kotlin/Java for Android, Node.js for web
-- **AI Engine**: Google Gemini API integration
-- **Build System**: Gradle for Android, Next.js for web
-- **Deployment**: Vercel (web), Google Play (Android)
+---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- [Android Studio](https://developer.android.com/studio) (for Android development)
-- [Node.js 18+](https://nodejs.org/) (for web development)
-- [Git](https://git-scm.com/)
-- Google Gemini API Key ([Get one here](https://ai.google.dev/))
+### Web (Vercel / Local)
 
-### 🔧 Installation
-
-#### Option 1: Android Development
 ```bash
-# Clone the repository
+# 1. Clone
 git clone https://github.com/jaykk99/Agent.git
-cd Agent
+cd Agent/web
 
-# Open in Android Studio
-# 1. Open Android Studio
-# 2. Select "Open" and choose the Agent directory
-# 3. Allow Android Studio to sync and download dependencies
-```
-
-#### Option 2: Web Development
-```bash
-# Clone and setup
-git clone https://github.com/jaykk99/Agent.git
-cd Agent
-
-# Install dependencies (if web components exist)
+# 2. Install dependencies
 npm install
-# or
-yarn install
-```
 
-### ⚙️ Configuration
+# 3. Add environment variables
+cp .env.example .env.local
+# Edit .env.local — minimum required:
+#   GROQ_API_KEY=...
+#   ANTHROPIC_API_KEY=...    (optional — Claude models)
+#   GEMINI_API_KEY=...       (optional — Gemini models)
+#   ELEVENLABS_API_KEY=sk_8b5331aa2f2aed79d405d9f5f24fdec1a87f2b6f45574abe
 
-1. **Create Environment File**
-   ```bash
-   cp .env.example .env
-   ```
-
-2. **Add Your API Keys**
-   ```env
-   GEMINI_API_KEY=your_gemini_api_key_here
-   # Add other environment variables as needed
-   ```
-
-3. **Android Setup** (if using Android)
-   - Remove the debug signing config line from `app/build.gradle.kts`:
-   ```kotlin
-   // Remove this line:
-   signingConfig = signingConfigs.getByName("debugConfig")
-   ```
-
-### 🏃‍♂️ Running the Application
-
-#### Android
-1. Open the project in Android Studio
-2. Connect an Android device or start an emulator
-3. Click "Run" or press `Ctrl+R` (Windows/Linux) / `Cmd+R` (Mac)
-
-#### Web (if applicable)
-```bash
-# Development server
+# 4. Start dev server
 npm run dev
-# or
-yarn dev
+# → http://localhost:3000
 
-# Build for production
-npm run build
-# or
-yarn build
+# 5. Production build
+npm run build && npm start
 ```
 
-## 📚 API Documentation
-
-### Core Endpoints
-
-#### AI Agent Interaction
-```typescript
-// Example API call structure
-const response = await fetch('/api/agent', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`
-  },
-  body: JSON.stringify({
-    message: 'Your query here',
-    model: 'gemini-pro',
-    options: {
-      temperature: 0.7,
-      maxTokens: 1000
-    }
-  })
-});
+### One-command deploy to Vercel
+```bash
+npm i -g vercel
+cd Agent/web
+vercel --prod
+# Set env vars in Vercel dashboard or via:
+vercel env add ELEVENLABS_API_KEY
 ```
 
-#### Response Format
-```json
-{
-  "success": true,
-  "data": {
-    "response": "AI generated response",
-    "model": "gemini-pro",
-    "timestamp": "2024-01-01T00:00:00Z",
-    "usage": {
-      "inputTokens": 10,
-      "outputTokens": 50
-    }
-  }
-}
+---
+
+## 📱 Android / Termux {#android-termux}
+
+### First-time setup
+
+```bash
+# 1. Install core packages
+pkg update && pkg install -y git nodejs python mpv
+
+# 2. Install Python deps
+pip install requests
+
+# 3. Clone the repo
+git clone https://github.com/jaykk99/Agent.git ~/jarvis
+cd ~/jarvis
+
+# 4. Make start script executable
+chmod +x start.sh
+
+# 5. Install Node deps + test voice
+./start.sh install
+./start.sh test-voice
 ```
 
-### Android SDK Integration
+### Launch commands
 
-```kotlin
-// Example Android integration
-class AIAgentClient {
-    private val apiKey = BuildConfig.GEMINI_API_KEY
-    
-    suspend fun queryAgent(message: String): AIResponse {
-        // Implementation here
-    }
-}
+```bash
+# ── Standard start (web + voice) ──────────────────────────
+./start.sh
+
+# ── Test voice only ───────────────────────────────────────
+./start.sh test-voice
+
+# ── Pipe any text through Jarvis voice ───────────────────
+echo "Hello, I am Jarvis" | ./start.sh voice
+echo "Analysis complete" | python3 voice.py
+
+# ── Install / update dependencies only ───────────────────
+./start.sh install
+
+# ── Manual web start ─────────────────────────────────────
+cd web && npm run dev
 ```
+
+### Termux shortcut (optional)
+Add to `~/.bashrc` or `~/.zshrc`:
+```bash
+alias jarvis="cd ~/jarvis && ./start.sh"
+alias jarvis-voice="python3 ~/jarvis/voice.py"
+```
+
+---
+
+## 🔊 Voice (ElevenLabs) {#voice}
+
+Jarvis reads every AI response aloud using ElevenLabs TTS.
+
+### Web UI
+1. Open **Model Settings** tab → scroll to **Voice**
+2. Toggle "Enable voice"
+3. Pick a voice — Adam (default), Rachel, Josh, Bella, Domi, Sam
+4. The 🔊 toolbar button mutes / stops mid-speech
+
+### Android / Termux
+```bash
+# Test voice directly
+./start.sh test-voice
+
+# Speak any text
+echo "Systems online" | python3 voice.py
+
+# Change voice (set env var before running)
+JARVIS_VOICE_ID=21m00Tcm4TlvDq8ikWAM python3 voice.py "Hello, I am Rachel"
+```
+
+### Available voices
+
+| Voice ID | Name | Style |
+|---|---|---|
+| `pNInz6obpgDQGcFmaJgB` | **Adam** (default) | Deep, assertive |
+| `21m00Tcm4TlvDq8ikWAM` | Rachel | Calm, natural |
+| `TxGEqnHWrfWFTfGW9XjX` | Josh | Young, energetic |
+| `EXAVITQu4vr4xnSDxMaL` | Bella | Soft, friendly |
+| `AZnzlk1XvdvUeBnXmlld` | Domi | Strong, confident |
+| `yoZ06aMxZJJ28mfd3POQ` | Sam | Newsreader style |
+
+### ElevenLabs API key
+The server key is pre-configured in Vercel (`ELEVENLABS_API_KEY`).  
+To use your own key locally:
+```bash
+export ELEVENLABS_API_KEY=sk_your_key_here
+./start.sh test-voice
+```
+
+---
+
+## 📊 Hardware Monitor
+
+A live status bar above chat messages shows:
+
+| Metric | Meaning |
+|---|---|
+| Context fill bar | Tokens used vs model max window — yellow > 50%, red > 80% |
+| Latency | Time from send → full response |
+| Device RAM | `navigator.deviceMemory` (browser API) |
+| ⚠ Warning | "Context almost full — start new chat" when > 80% |
+
+---
+
+## 🌐 Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GROQ_API_KEY` | ✅ | Llama, Mixtral, DeepSeek (default models) |
+| `ANTHROPIC_API_KEY` | Optional | Claude 3.5 Sonnet/Haiku/Opus |
+| `GEMINI_API_KEY` | Optional | Gemini 2.5 Pro/Flash |
+| `OPENROUTER_API_KEY` | Optional | 200+ models via OpenRouter |
+| `HF_TOKEN` | Optional | Gated HuggingFace models |
+| `ELEVENLABS_API_KEY` | Optional | Voice TTS (server key pre-configured) |
+| `GITHUB_TOKEN` | Optional | GitHub repo context injection |
+| `NEXT_PUBLIC_SUPABASE_URL` | Optional | Message persistence |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional | Supabase auth |
+
+---
 
 ## 🏗️ Project Structure
 
 ```
 Agent/
-├── app/                    # Android app source
-│   ├── src/main/
-│   │   ├── java/          # Kotlin/Java source files
-│   │   ├── res/           # Android resources
-│   │   └── AndroidManifest.xml
-│   └── build.gradle.kts   # App-level Gradle config
-├── gradle/                 # Gradle wrapper
-├── web/                   # Web application (if applicable)
-│   ├── src/
-│   ├── public/
-│   └── package.json
-├── assets/                # Shared assets
-├── .env.example          # Environment variables template
-├── .gitignore
-├── build.gradle.kts      # Project-level Gradle config
-├── settings.gradle.kts   # Gradle settings
-├── metadata.json         # Project metadata
-└── README.md            # This file
+├── voice.py              # ElevenLabs TTS — use anywhere (web/Android)
+├── start.sh              # One-command launcher (Termux / Linux)
+├── web/                  # Next.js 14 TypeScript web app
+│   ├── app/
+│   │   ├── page.tsx      # Main chat UI + hardware monitor + voice toggle
+│   │   └── api/
+│   │       ├── chat/     # Multi-model streaming SSE endpoint
+│   │       ├── tts/      # ElevenLabs TTS proxy
+│   │       └── ...
+│   └── lib/
+│       ├── orchestrator.ts    # Multi-agent routing (6 specialist roles)
+│       ├── agentState.ts      # Procedural state + memory decay
+│       └── workspaceSkills.ts # 100-skill workspace
+├── app/                  # Android Kotlin app
+└── README.md
 ```
 
-## 🌐 Deployment
-
-### Vercel (Web)
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel --prod
-```
-
-### Android (Google Play)
-1. Build release APK in Android Studio
-2. Sign with release keystore
-3. Upload to Google Play Console
-
-### Environment Variables (Vercel)
-Set these in your Vercel dashboard:
-```
-GEMINI_API_KEY=your_api_key
-NODE_ENV=production
-```
-
-## 🧪 Development
-
-### Testing
-```bash
-# Android tests
-./gradlew test
-
-# Web tests (if applicable)
-npm test
-```
-
-### Code Quality
-```bash
-# Kotlin linting
-./gradlew ktlintCheck
-
-# Web linting
-npm run lint
-```
-
-### Building
-```bash
-# Android debug build
-./gradlew assembleDebug
-
-# Android release build
-./gradlew assembleRelease
-
-# Web build
-npm run build
-```
-
-## 🔧 Configuration Options
-
-### AI Model Settings
-- **Model**: `gemini-pro`, `gemini-pro-vision`
-- **Temperature**: 0.0 to 1.0 (creativity level)
-- **Max Tokens**: Maximum response length
-- **Top P**: Nucleus sampling parameter
-
-### Security Settings
-- API key rotation
-- Rate limiting
-- Input validation
-- Output sanitization
+---
 
 ## 🛠️ Troubleshooting
 
-### Common Issues
-
-**Android Studio Import Issues**
+**Voice not working on Android**
 ```bash
-# Clean and rebuild
-./gradlew clean
-./gradlew build
+pkg install mpv          # install audio player
+./start.sh test-voice    # test API + playback
 ```
 
-**API Key Issues**
-- Ensure your `.env` file is properly configured
-- Check that API key has proper permissions
-- Verify API key is not expired
-
-**Build Failures**
-- Update Android Studio and Gradle
-- Check Java/Kotlin version compatibility
-- Clear caches: `./gradlew clean`
-
-### Debug Mode
-Enable debug logging by setting:
-```env
-DEBUG=true
-LOG_LEVEL=debug
+**Port 3000 in use**
+```bash
+PORT=3001 ./start.sh
 ```
 
-## 📈 Performance
+**Node modules missing**
+```bash
+./start.sh install
+```
 
-- **Response Time**: < 500ms average
-- **Throughput**: 100+ requests/minute
-- **Memory Usage**: < 100MB typical
-- **Battery Optimization**: Android background processing optimized
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md).
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Google AI Studio team for excellent AI integration
-- Android development community
-- Open source contributors
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/jaykk99/Agent/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/jaykk99/Agent/discussions)
-- **Email**: [Create an issue](https://github.com/jaykk99/Agent/issues/new)
+**ElevenLabs 503**  
+Server key is active — check Vercel env vars or set `ELEVENLABS_API_KEY` locally.
 
 ---
 
 <div align="center">
-  <p><strong>Built with ❤️ by @jaykk99</strong></p>
+  <p><strong>Built by <a href="https://github.com/jaykk99">@jaykk99</a></strong></p>
   <p>
     <a href="https://github.com/jaykk99/Agent">GitHub</a> |
-    <a href="https://api-ai-agent.vercel.app">Live Demo</a> |
-    <a href="https://ai.studio">AI Studio</a>
+    <a href="https://api-ai-agent.vercel.app">Live Demo</a>
   </p>
 </div>
