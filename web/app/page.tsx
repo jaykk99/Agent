@@ -5,7 +5,7 @@ import {
   Send, Bot, Plug, Settings, Github, Trash2, Plus, Copy, Check,
   ChevronDown, ChevronUp, Loader2, X, AlertCircle, LogOut,
   Globe, FolderOpen, ExternalLink, Zap, Terminal, Search,
-  Database, Cloud, Code2, GitBranch, Eye
+  Database, Cloud, Code2, GitBranch, Eye, Volume2, VolumeX, Activity
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────── */
@@ -48,6 +48,9 @@ interface AppSettings {
   custom_model_api_key: string;
   custom_model_name: string;
   hf_api_key: string;
+  elevenlabs_api_key: string;
+  tts_enabled: boolean;
+  tts_voice_id: string;
   github_token: string;
   github_username: string;
   github_avatar_url: string;
@@ -77,6 +80,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   enable_web_search: false,
   supabase_access_token: '', supabase_url: '', supabase_username: '', is_supabase_connected: false,
   vercel_access_token: '', vercel_username: '', is_vercel_connected: false,
+  elevenlabs_api_key: '', tts_enabled: false, tts_voice_id: 'pNInz6obpgDQGcFmaJgB',
 };
 
 type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
@@ -155,6 +159,51 @@ function shortModelLabel(id: string): string {
     'hf:google/gemma-2-27b-it':   'Gemma 2 27B (HF)',
   };
   return map[id] ?? id.split('/').pop()?.replace(/-/g,' ') ?? id;
+}
+
+/* ─── Context-window sizes by model ID ──────────────── */
+const CTX_WINDOW: Record<string, number> = {
+  'llama-3.3-70b-versatile': 128000, 'llama-3.1-8b-instant': 128000,
+  'mixtral-8x7b-32768': 32768, 'deepseek-r1-distill-llama-70b': 64000,
+  'claude-3-5-sonnet-20241022': 200000, 'claude-3-5-haiku-20241022': 200000, 'claude-opus-4-5': 200000,
+  'gemini-2.5-pro': 1048576, 'gemini-2.5-flash': 1048576, 'gemini-2.5-flash-lite': 1048576, 'gemini-2.0-flash': 1048576,
+  'gh:gpt-4.1': 1047576, 'gh:gpt-4.1-mini': 1047576, 'gh:gpt-4.1-nano': 1047576,
+  'gh:gpt-4o': 128000, 'gh:gpt-4o-mini': 128000,
+};
+
+/* ─── Hardware & Context Monitor ────────────────────── */
+function HardwareMonitor({ model, sessionTokens, latencyMs }: { model: string; sessionTokens: number; latencyMs: number }) {
+  const ctxSize  = CTX_WINDOW[model] ?? 128000;
+  const fillPct  = Math.min(100, Math.round((sessionTokens / ctxSize) * 100));
+  const fillColor = fillPct > 80 ? 'bg-red-500' : fillPct > 50 ? 'bg-yellow-400' : 'bg-emerald-500';
+  const textColor = fillPct > 80 ? 'text-red-400' : fillPct > 50 ? 'text-yellow-400' : 'text-emerald-400';
+  const devMem = typeof navigator !== 'undefined' ? (navigator as unknown as { deviceMemory?: number }).deviceMemory : null;
+  const ctxLabel = ctxSize >= 1_000_000 ? `${(ctxSize/1_000_000).toFixed(1)}M` : `${Math.round(ctxSize/1000)}k`;
+  return (
+    <div className="px-4 py-1.5 border-b border-gray-800/60 bg-gray-950/95 flex items-center gap-3 flex-wrap">
+      {/* Context fill */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Activity size={10} className="text-gray-600 flex-shrink-0"/>
+        <div className="w-20 h-1 bg-gray-800 rounded-full overflow-hidden">
+          <div style={{ width: `${fillPct}%` }} className={`h-full rounded-full transition-all duration-500 ${fillColor}`}/>
+        </div>
+        <span className={`text-[10px] font-mono ${textColor}`}>{sessionTokens.toLocaleString()}/{ctxLabel}</span>
+        <span className="text-[10px] text-gray-600">ctx</span>
+      </div>
+      {/* Latency */}
+      {latencyMs > 0 && (
+        <span className="text-[10px] text-gray-600 font-mono">
+          {latencyMs < 1000 ? `${latencyMs}ms` : `${(latencyMs/1000).toFixed(1)}s`}
+        </span>
+      )}
+      {/* Device RAM */}
+      {devMem && <span className="text-[10px] text-gray-600 font-mono">{devMem}GB RAM</span>}
+      {/* Context warning */}
+      {fillPct > 80 && (
+        <span className="text-[10px] text-red-400 font-medium">⚠ context almost full — start new chat</span>
+      )}
+    </div>
+  );
 }
 
 /* ─── Tool Call Badge ───────────────────────────────── */
@@ -323,6 +372,11 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [totalTokens, setTotalTokens] = useState(0);
+  const [lastLatencyMs, setLastLatencyMs] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const sendStartRef = useRef<number>(0);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const [thinkingStatus, setThinkingStatus] = useState('Thinking…');
   const [connectors, setConnectors] = useState<ApiTemplate[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -510,6 +564,7 @@ export default function Home() {
         : text;
 
       setThinkingStatus('Working…');
+      sendStartRef.current = Date.now();
 
       // ── Streaming fetch with live tool-call status updates ──────────────
       const chatRes = await fetch('/api/chat', {
@@ -583,6 +638,8 @@ export default function Home() {
                 if (chunk.model)    streamModel    = chunk.model;
                 if (chunk.provider) streamProvider = chunk.provider;
                 if (chunk.role)     streamRole     = chunk.role;
+                if (chunk.estimatedTokens) setTotalTokens(prev => prev + (chunk.estimatedTokens as number));
+                setLastLatencyMs(Date.now() - sendStartRef.current);
               } else if (chunk.text) {
                 finalText = chunk.text;
               }
@@ -626,6 +683,7 @@ export default function Home() {
         tool_calls: resp.tool_calls || [],
       };
       setMessages(prev => [...prev, aiMsg]);
+      speakText(aiText);
       await api('/api/db/messages', { method: 'POST', body: JSON.stringify({ session_id: sessionId, ...aiMsg }) }).catch(() => {});
 
     } catch (e: unknown) {
@@ -659,6 +717,34 @@ export default function Home() {
     if (!sessionId) return;
     await api(`/api/db/messages?session_id=${sessionId}&all=true`, { method: 'DELETE' }).catch(() => {});
     setMessages([]);
+    setTotalTokens(0);
+    setLastLatencyMs(0);
+  };
+
+  /* ── ElevenLabs TTS ──────────────────────────────── */
+  const speakText = (text: string) => {
+    if (!settings.tts_enabled) return;
+    if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null; }
+    // Strip markdown symbols for cleaner audio
+    const clean = text.replace(/[#*`_~\[\]]/g, '').replace(/\n+/g, ' ').trim().slice(0, 1500);
+    if (!clean) return;
+    setIsSpeaking(true);
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean, voice_id: settings.tts_voice_id || 'pNInz6obpgDQGcFmaJgB' }),
+    }).then(res => {
+      if (!res.ok) { setIsSpeaking(false); return; }
+      return res.blob();
+    }).then(blob => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudioRef.current = audio;
+      audio.onended = () => { URL.revokeObjectURL(url); setIsSpeaking(false); currentAudioRef.current = null; };
+      audio.onerror = () => { setIsSpeaking(false); currentAudioRef.current = null; };
+      audio.play().catch(() => setIsSpeaking(false));
+    }).catch(() => setIsSpeaking(false));
   };
 
   /* ── Connected integrations badge ── */
@@ -707,6 +793,24 @@ export default function Home() {
               <Trash2 size={12}/> Clear
             </button>
           )}
+          {/* TTS toggle */}
+          <button
+            onClick={() => {
+              if (isSpeaking && currentAudioRef.current) {
+                currentAudioRef.current.pause(); currentAudioRef.current = null; setIsSpeaking(false);
+              } else {
+                const u = { ...settings, tts_enabled: !settings.tts_enabled };
+                setSettings(u); saveSettings(u);
+              }
+            }}
+            title={isSpeaking ? 'Stop speaking' : settings.tts_enabled ? 'Voice on (click to mute)' : 'Voice off (click to enable)'}
+            className={`flex items-center gap-1 px-2 py-1 rounded-lg transition-colors text-xs ${
+              isSpeaking ? 'text-indigo-300 bg-indigo-950/60 animate-pulse' :
+              settings.tts_enabled ? 'text-indigo-400 bg-indigo-950/40 hover:bg-indigo-950/60' :
+              'text-gray-600 hover:text-gray-400 hover:bg-gray-800'
+            }`}>
+            {isSpeaking ? <Volume2 size={12}/> : settings.tts_enabled ? <Volume2 size={12}/> : <VolumeX size={12}/>}
+          </button>
         </div>
       </div>
 
@@ -730,6 +834,14 @@ export default function Home() {
         {/* ── CHAT TAB ── */}
         {tab === 'chat' && (
           <>
+            {/* Hardware + context monitor — shown only when chat has content */}
+            {messages.length > 0 && (
+              <HardwareMonitor
+                model={settings.active_model_name}
+                sessionTokens={totalTokens}
+                latencyMs={lastLatencyMs}
+              />
+            )}
             <div className="flex-1 overflow-y-auto px-4 py-4 space-y-0">
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 pb-8">
@@ -1123,6 +1235,44 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
               onChange={e => setLocal(s => ({ ...s, hf_api_key: e.target.value }))}
               placeholder="hf_…" className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
             <p className="text-xs text-gray-600 mt-1">Required for gated HF models. Free at huggingface.co/settings/tokens</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── ElevenLabs Voice ── */}
+      <div>
+        <h3 className="font-semibold text-white mb-1 flex items-center gap-2">
+          <Volume2 size={14} className="text-indigo-400"/> Voice (ElevenLabs)
+        </h3>
+        <p className="text-xs text-gray-500 mb-3">Jarvis will read AI responses aloud. Server key is pre-configured.</p>
+        <div className="bg-gray-800/60 border border-gray-700/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-300">Enable voice</span>
+            <button
+              onClick={() => setLocal(s => ({ ...s, tts_enabled: !s.tts_enabled }))}
+              className={`w-10 h-5 rounded-full transition-colors relative ${local.tts_enabled ? 'bg-indigo-600' : 'bg-gray-600'}`}>
+              <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${local.tts_enabled ? 'left-5' : 'left-0.5'}`}/>
+            </button>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Voice</label>
+            <select value={local.tts_voice_id || 'pNInz6obpgDQGcFmaJgB'}
+              onChange={e => setLocal(s => ({ ...s, tts_voice_id: e.target.value }))}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
+              <option value="pNInz6obpgDQGcFmaJgB">Adam — Deep, assertive (default)</option>
+              <option value="21m00Tcm4TlvDq8ikWAM">Rachel — Calm, natural</option>
+              <option value="TxGEqnHWrfWFTfGW9XjX">Josh — Young, energetic</option>
+              <option value="AZnzlk1XvdvUeBnXmlld">Domi — Strong, confident</option>
+              <option value="EXAVITQu4vr4xnSDxMaL">Bella — Soft, friendly</option>
+              <option value="yoZ06aMxZJJ28mfd3POQ">Sam — Newsreader style</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Custom ElevenLabs API key (optional — server key active)</label>
+            <input type="password" value={local.elevenlabs_api_key || ''}
+              onChange={e => setLocal(s => ({ ...s, elevenlabs_api_key: e.target.value }))}
+              placeholder="sk_… (leave blank to use server key)"
+              className="w-full bg-gray-700 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 placeholder-gray-500 focus:ring-1 focus:ring-indigo-500"/>
           </div>
         </div>
       </div>
