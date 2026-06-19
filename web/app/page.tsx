@@ -173,34 +173,108 @@ const CTX_WINDOW: Record<string, number> = {
 
 /* ─── Hardware & Context Monitor ────────────────────── */
 function HardwareMonitor({ model, sessionTokens, latencyMs }: { model: string; sessionTokens: number; latencyMs: number }) {
-  const ctxSize  = CTX_WINDOW[model] ?? 128000;
-  const fillPct  = Math.min(100, Math.round((sessionTokens / ctxSize) * 100));
+  const ctxSize   = CTX_WINDOW[model] ?? 128000;
+  const fillPct   = Math.min(100, Math.round((sessionTokens / ctxSize) * 100));
   const fillColor = fillPct > 80 ? 'bg-red-500' : fillPct > 50 ? 'bg-yellow-400' : 'bg-emerald-500';
   const textColor = fillPct > 80 ? 'text-red-400' : fillPct > 50 ? 'text-yellow-400' : 'text-emerald-400';
-  const devMem = typeof navigator !== 'undefined' ? (navigator as unknown as { deviceMemory?: number }).deviceMemory : null;
-  const ctxLabel = ctxSize >= 1_000_000 ? `${(ctxSize/1_000_000).toFixed(1)}M` : `${Math.round(ctxSize/1000)}k`;
+  const ctxLabel  = ctxSize >= 1_000_000 ? `${(ctxSize/1_000_000).toFixed(1)}M` : `${Math.round(ctxSize/1000)}k`;
+
+  // Hardware metrics — polled every 3 s
+  const [hw, setHw] = useState<{
+    ram: number | null; cores: number | null;
+    storageUsedGB: number | null; storageTotalGB: number | null;
+    battery: number | null; batteryCharging: boolean;
+  }>({ ram: null, cores: null, storageUsedGB: null, storageTotalGB: null, battery: null, batteryCharging: false });
+
+  useEffect(() => {
+    const poll = async () => {
+      const nav = navigator as unknown as {
+        deviceMemory?: number; hardwareConcurrency?: number;
+        storage?: { estimate: () => Promise<{ quota?: number; usage?: number }> };
+        getBattery?: () => Promise<{ level: number; charging: boolean }>;
+      };
+      const ram   = nav.deviceMemory ?? null;
+      const cores = nav.hardwareConcurrency ?? null;
+      let storageUsedGB: number | null = null, storageTotalGB: number | null = null;
+      try {
+        if (nav.storage?.estimate) {
+          const s = await nav.storage.estimate();
+          if (s.usage != null)  storageUsedGB  = +(s.usage  / 1e9).toFixed(2);
+          if (s.quota != null)  storageTotalGB = +(s.quota  / 1e9).toFixed(1);
+        }
+      } catch { /* ignore */ }
+      let battery: number | null = null; let batteryCharging = false;
+      try {
+        if (nav.getBattery) {
+          const b = await nav.getBattery();
+          battery = Math.round(b.level * 100);
+          batteryCharging = b.charging;
+        }
+      } catch { /* ignore */ }
+      setHw({ ram, cores, storageUsedGB, storageTotalGB, battery, batteryCharging });
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  const batteryColor = hw.battery != null
+    ? hw.battery > 50 ? 'text-emerald-400' : hw.battery > 20 ? 'text-yellow-400' : 'text-red-400'
+    : 'text-gray-600';
+
   return (
-    <div className="px-4 py-1.5 border-b border-gray-800/60 bg-gray-950/95 flex items-center gap-3 flex-wrap">
-      {/* Context fill */}
-      <div className="flex items-center gap-1.5 min-w-0">
+    <div className="px-4 py-1.5 border-b border-gray-800/60 bg-gray-950/95 flex items-center gap-3 flex-wrap text-[10px]">
+      {/* ── Context fill ── */}
+      <div className="flex items-center gap-1.5">
         <Activity size={10} className="text-gray-600 flex-shrink-0"/>
         <div className="w-20 h-1 bg-gray-800 rounded-full overflow-hidden">
           <div style={{ width: `${fillPct}%` }} className={`h-full rounded-full transition-all duration-500 ${fillColor}`}/>
         </div>
-        <span className={`text-[10px] font-mono ${textColor}`}>{sessionTokens.toLocaleString()}/{ctxLabel}</span>
-        <span className="text-[10px] text-gray-600">ctx</span>
+        <span className={`font-mono ${textColor}`}>{sessionTokens.toLocaleString()}/{ctxLabel}</span>
+        <span className="text-gray-600">ctx</span>
       </div>
-      {/* Latency */}
+
+      {/* ── Latency ── */}
       {latencyMs > 0 && (
-        <span className="text-[10px] text-gray-600 font-mono">
-          {latencyMs < 1000 ? `${latencyMs}ms` : `${(latencyMs/1000).toFixed(1)}s`}
+        <span className="text-gray-500 font-mono">
+          ⚡ {latencyMs < 1000 ? `${latencyMs}ms` : `${(latencyMs/1000).toFixed(1)}s`}
         </span>
       )}
-      {/* Device RAM */}
-      {devMem && <span className="text-[10px] text-gray-600 font-mono">{devMem}GB RAM</span>}
-      {/* Context warning */}
+
+      {/* ── CPU cores ── */}
+      {hw.cores != null && (
+        <span className="text-gray-500 font-mono">
+          CPU {hw.cores}×
+        </span>
+      )}
+
+      {/* ── RAM ── */}
+      {hw.ram != null && (
+        <span className="text-gray-500 font-mono">
+          {hw.ram}GB RAM
+        </span>
+      )}
+
+      {/* ── Storage ── */}
+      {hw.storageUsedGB != null && hw.storageTotalGB != null && (
+        <span className={`font-mono ${hw.storageTotalGB > 0 && hw.storageUsedGB / hw.storageTotalGB > 0.9 ? 'text-red-400' : 'text-gray-500'}`}>
+          💾 {hw.storageUsedGB}/{hw.storageTotalGB}GB
+        </span>
+      )}
+
+      {/* ── Battery ── */}
+      {hw.battery != null && (
+        <span className={`font-mono ${batteryColor}`}>
+          {hw.batteryCharging ? '⚡' : '🔋'} {hw.battery}%
+        </span>
+      )}
+
+      {/* ── Warnings ── */}
       {fillPct > 80 && (
-        <span className="text-[10px] text-red-400 font-medium">⚠ context almost full — start new chat</span>
+        <span className="text-red-400 font-medium">⚠ context almost full — start new chat</span>
+      )}
+      {hw.battery != null && !hw.batteryCharging && hw.battery <= 20 && (
+        <span className="text-red-400 font-medium">⚠ low battery</span>
       )}
     </div>
   );
