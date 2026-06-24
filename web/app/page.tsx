@@ -971,46 +971,45 @@ export default function Home() {
                   className="bg-gray-800/80 border border-gray-700/50 rounded-full pl-3 pr-6 py-1 text-[11px] text-indigo-300 outline-none hover:border-indigo-600/60 cursor-pointer appearance-none focus:ring-1 focus:ring-indigo-600/50 transition-colors font-medium"
                   style={{ backgroundImage: 'none' }}
                 >
-                  <optgroup label="── Anthropic Claude">
-                    <option value="claude-3-5-sonnet-20241022">✨ Claude 3.5 Sonnet</option>
-                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
-                    <option value="claude-opus-4-5">Claude Opus 4.5</option>
+                  <optgroup label="☁ Anthropic Claude">
+                    <option value="claude-3-5-sonnet-20241022">☁ Claude 3.5 Sonnet</option>
+                    <option value="claude-3-5-haiku-20241022">☁ Claude 3.5 Haiku</option>
+                    <option value="claude-opus-4-5">☁ Claude Opus 4.5</option>
                   </optgroup>
-                  <optgroup label="── Groq (ultra-fast)">
-                    <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B (Groq)</option>
-                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Groq)</option>
-                    <option value="mixtral-8x7b-32768">Mixtral 8x7B (Groq)</option>
-                    <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 (Groq)</option>
+                  <optgroup label="☁ Groq — ultra-fast">
+                    <option value="llama-3.3-70b-versatile">☁ Llama 3.3 70B (Groq)</option>
+                    <option value="llama-3.1-8b-instant">☁ Llama 3.1 8B (Groq)</option>
+                    <option value="mixtral-8x7b-32768">☁ Mixtral 8x7B (Groq)</option>
+                    <option value="deepseek-r1-distill-llama-70b">☁ DeepSeek R1 (Groq)</option>
                   </optgroup>
-                  <optgroup label="── GitHub Models (free)">
-                    <option value="gh:gpt-4.1">🔥 GPT-4.1 (free)</option>
-                    <option value="gh:gpt-4.1-mini">GPT-4.1 Mini (free)</option>
-                    <option value="gh:gpt-4.1-nano">GPT-4.1 Nano (free)</option>
-                    <option value="gh:gpt-4o">GPT-4o (free)</option>
-                    <option value="gh:gpt-4o-mini">GPT-4o Mini (free)</option>
-                    <option value="gh:llama-3.3-70b">Llama 3.3 70B (Meta, free)</option>
-                    <option value="gh:deepseek-v3">DeepSeek V3 (free)</option>
-                    <option value="gh:phi-4">Phi-4 (Microsoft, free)</option>
+                  <optgroup label="☁ OpenAI">
+                    <option value="gpt-4o">☁ GPT-4o</option>
+                    <option value="gpt-4o-mini">☁ GPT-4o Mini</option>
+                    <option value="o4-mini">☁ o4-mini (reasoning)</option>
                   </optgroup>
-                  <optgroup label="── Gemini">
-                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                    <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  <optgroup label="☁ GitHub Models — free tier">
+                    <option value="gh:gpt-4.1">☁ GPT-4.1 (free)</option>
+                    <option value="gh:gpt-4.1-mini">☁ GPT-4.1 Mini (free)</option>
+                    <option value="gh:gpt-4.1-nano">☁ GPT-4.1 Nano (free)</option>
                   </optgroup>
-                  <optgroup label="☁️ OpenRouter (200+ models)">
-                    <option value="openai/gpt-4o">GPT-4o via OpenRouter</option>
-                    <option value="anthropic/claude-3.5-sonnet">Claude 3.5 via OpenRouter</option>
-                    <option value="google/gemini-2.5-flash">Gemini 2.5 via OpenRouter</option>
-                    <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 via OpenRouter</option>
-                    <option value="deepseek/deepseek-r1">DeepSeek R1 via OpenRouter</option>
-                    <option value="mistralai/mistral-large">Mistral Large via OpenRouter</option>
-                    <option value="qwen/qwen-2.5-72b-instruct">Qwen 2.5 via OpenRouter</option>
+                  <optgroup label="☁ Gemini">
+                    <option value="gemini-2.5-pro">☁ Gemini 2.5 Pro</option>
+                    <option value="gemini-2.5-flash">☁ Gemini 2.5 Flash</option>
+                    <option value="gemini-2.0-flash">☁ Gemini 2.0 Flash</option>
+                    <option value="gemini-1.5-pro">☁ Gemini 1.5 Pro</option>
                   </optgroup>
-                  <optgroup label="🖥️ HuggingFace">
-                    <option value="hf:Qwen/Qwen2.5-72B-Instruct">Qwen 2.5 72B (HF)</option>
-                    <option value="hf:meta-llama/Llama-3.1-70B-Instruct">Llama 3.1 70B (HF)</option>
-                    <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">Mistral 7B (HF)</option>
+                  <optgroup label="☁ OpenRouter — 200+ models">
+                    <option value="openai/gpt-4o">☁ GPT-4o (OpenRouter)</option>
+                    <option value="anthropic/claude-3.5-sonnet">☁ Claude 3.5 (OpenRouter)</option>
+                    <option value="google/gemini-2.5-flash">☁ Gemini 2.5 (OpenRouter)</option>
+                    <option value="deepseek/deepseek-r1">☁ DeepSeek R1 (OpenRouter)</option>
+                    <option value="mistralai/mistral-large">☁ Mistral Large (OpenRouter)</option>
+                  </optgroup>
+                  <optgroup label="🖥 HuggingFace — local-capable">
+                    <option value="hf:meta-llama/Meta-Llama-3.1-70B-Instruct">🖥 Llama 3.1 70B (HF)</option>
+                    <option value="hf:mistralai/Mistral-7B-Instruct-v0.3">🖥 Mistral 7B (HF)</option>
+                    <option value="hf:Qwen/Qwen2.5-72B-Instruct">🖥 Qwen 2.5 72B (HF)</option>
+                    <option value="hf:microsoft/Phi-3.5-mini-instruct">🖥 Phi-3.5 Mini (HF)</option>
                     <option value="hf:google/gemma-2-27b-it">Gemma 2 27B (HF)</option>
                   </optgroup>
                 </select>
@@ -1216,13 +1215,13 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
             <label className="text-xs text-gray-400 mb-1 block">Active Model</label>
             <select value={local.active_model_name} onChange={e => setLocal(s => ({ ...s, active_model_name: e.target.value }))}
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none text-gray-100 focus:ring-1 focus:ring-indigo-500">
-              <optgroup label="── Anthropic Claude (server key active)">
-                <option value="claude-3-5-sonnet-20241022">✨ Claude 3.5 Sonnet — Best quality</option>
-                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku — Fast</option>
-                <option value="claude-opus-4-5">Claude Opus 4.5 — Most powerful</option>
+              <optgroup label="☁ Anthropic Claude — server key active">
+                <option value="claude-3-5-sonnet-20241022">☁ Claude 3.5 Sonnet — best quality</option>
+                <option value="claude-3-5-haiku-20241022">☁ Claude 3.5 Haiku — fast</option>
+                <option value="claude-opus-4-5">☁ Claude Opus 4.5 — most powerful</option>
               </optgroup>
-              <optgroup label="── Groq (ultra-fast open source · server key active)">
-                <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B (Groq) — Best open source</option>
+              <optgroup label="☁ Groq — ultra-fast open source · server key active">
+                <option value="llama-3.3-70b-versatile">☁ Llama 3.3 70B (Groq) — Best open source</option>
                 <option value="llama-3.1-8b-instant">Llama 3.1 8B (Groq) — Fastest</option>
                 <option value="mixtral-8x7b-32768">Mixtral 8x7B (Groq)</option>
                 <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 70B (Groq) — Reasoning</option>
