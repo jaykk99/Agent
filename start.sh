@@ -14,7 +14,7 @@ _LOGDIR="${TMPDIR:-/tmp}"
 mkdir -p "$_LOGDIR" 2>/dev/null || true
 LOG="$_LOGDIR/jarvis.log"
 
-export ELEVENLABS_API_KEY="${ELEVENLABS_API_KEY:-sk_8b5331aa2f2aed79d405d9f5f24fdec1a87f2b6f45574abe}"
+# ELEVENLABS_API_KEY comes from the environment — never hardcode it here.
 
 # ── Dependency check ─────────────────────────
 check_deps() {

@@ -42,10 +42,10 @@ npm install
 # 3. Add environment variables
 cp .env.example .env.local
 # Edit .env.local — minimum required:
-#   GROQ_API_KEY=...
-#   ANTHROPIC_API_KEY=...    (optional — Claude models)
-#   GEMINI_API_KEY=...       (optional — Gemini models)
-#   ELEVENLABS_API_KEY=sk_8b5331aa2f2aed79d405d9f5f24fdec1a87f2b6f45574abe
+#   GROQ_API_KEY=your-groq-key-here
+#   ANTHROPIC_API_KEY=your-anthropic-key-here    (optional — Claude models)
+#   GEMINI_API_KEY=your-gemini-key-here       (optional — Gemini models)
+#   ELEVENLABS_API_KEY=your-elevenlabs-key-here
 
 # 4. Start dev server
 npm run dev
@@ -152,10 +152,10 @@ JARVIS_VOICE_ID=21m00Tcm4TlvDq8ikWAM python3 voice.py "Hello, I am Rachel"
 | `yoZ06aMxZJJ28mfd3POQ` | Sam | Newsreader style |
 
 ### ElevenLabs API key
-The server key is pre-configured in Vercel (`ELEVENLABS_API_KEY`).  
-To use your own key locally:
+Voice is optional: without `ELEVENLABS_API_KEY` the voice toggle is hidden and
+chat works normally. To enable voice locally or on Vercel:
 ```bash
-export ELEVENLABS_API_KEY=sk_your_key_here
+export ELEVENLABS_API_KEY=your-elevenlabs-key-here
 ./start.sh test-voice
 ```
 
@@ -184,12 +184,12 @@ A live status bar above chat messages shows:
 
 | Variable | Required | Description |
 |---|---|---|
-| `GROQ_API_KEY` | ✅ | Llama, Mixtral, DeepSeek (default models) |
+| `GROQ_API_KEY` | Optional | Llama, Mixtral, DeepSeek (defaults; keyless fallback without it) |
 | `ANTHROPIC_API_KEY` | Optional | Claude 3.5 Sonnet/Haiku/Opus |
 | `GEMINI_API_KEY` | Optional | Gemini 2.5 Pro/Flash |
 | `OPENROUTER_API_KEY` | Optional | 200+ models via OpenRouter |
 | `HF_TOKEN` | Optional | Gated HuggingFace models |
-| `ELEVENLABS_API_KEY` | Optional | Voice TTS (server key pre-configured) |
+| `ELEVENLABS_API_KEY` | Optional | Voice TTS (voice stays off without it) |
 | `GITHUB_TOKEN` | Optional | GitHub repo context injection |
 | `NEXT_PUBLIC_SUPABASE_URL` | Optional | Message persistence |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Optional | Supabase auth |

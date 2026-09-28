@@ -21,8 +21,7 @@ export function rateLimit(identifier: string, namespace: string, limit: number, 
   return { ok: true, remaining: limit - bucket.count };
 }
 
-const PRUNE_MS = 5 * 60 * 1_000;
-let _lastPrune = Date.now();
+const PRUNE_MS = 5 * 60 * 1_000;let _lastPrune = Date.now();
 export function pruneExpiredBuckets(windowSec: number): void {
   const now = Date.now();
   if (now - _lastPrune < PRUNE_MS) return;
@@ -30,4 +29,11 @@ export function pruneExpiredBuckets(windowSec: number): void {
   for (const [k, b] of _buckets.entries()) {
     if (now - b.windowStart >= windowSec * 2_000) _buckets.delete(k);
   }
+}
+
+/** Extract the client IP from a Next.js request (proxy-aware). */
+export function getClientIp(req: { headers: { get(name: string): string | null } }): string {
+  const fwd = req.headers.get('x-forwarded-for');
+  if (fwd) return fwd.split(',')[0].trim();
+  return req.headers.get('x-real-ip')?.trim() || '127.0.0.1';
 }

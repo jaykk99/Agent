@@ -132,6 +132,14 @@ export async function POST(req: NextRequest) {
     github:      (settings.github_token           as string) || process.env.GITHUB_TOKEN || '',
   };
 
+  // Keyless-first: does the selected provider have a usable key?
+  const providerKey: Record<Provider, string> = {
+    gemini: keys.gemini, openai: keys.openai, anthropic: keys.anthropic,
+    groq: keys.groq, openrouter: keys.openrouter, github: keys.github,
+    huggingface: keys.hf,
+  };
+  const hasKey = (providerKey[provider] ?? '').length > 0;
+
   // System prompt
   const systemPrompt = [
     'You are Jarvis, an advanced AI assistant. Be direct, helpful, and thorough.',
@@ -153,7 +161,29 @@ export async function POST(req: NextRequest) {
       try {
         let estimatedTokens = 0;
 
-        if (provider === 'gemini') {
+        if (!hasKey) {
+          // ── Keyless fallback — Pollinations free tier (no API key needed) ──
+          send(`data: ${JSON.stringify({ type: 'info', content: `No API key configured for ${provider} — using the free keyless fallback (Pollinations). Add a provider key in settings for full ${label} access.` })}\n\n`);
+
+          const res = await fetch('https://text.pollinations.ai/openai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'openai',
+              messages: [{ role: 'system', content: systemPrompt }, ...messages],
+              stream: true,
+            }),
+            signal: AbortSignal.timeout(55_000),
+          });
+
+          if (!res.ok) {
+            const err = await res.text().catch(() => '');
+            throw new Error(`Keyless fallback unavailable (${res.status}): ${err.slice(0, 200)}. Add a provider API key in settings.`);
+          }
+
+          await pipeOpenAIStream(res, send, (t) => { estimatedTokens = t; });
+
+        } else if (provider === 'gemini') {
           // ── Gemini ────────────────────────────────────────────────────
           const key = keys.gemini;
           if (!key) throw new Error('GEMINI_API_KEY not configured');

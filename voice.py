@@ -17,7 +17,7 @@ Setup:
 """
 import sys, os, re, subprocess, requests
 
-API_KEY  = os.environ.get("ELEVENLABS_API_KEY", "sk_8b5331aa2f2aed79d405d9f5f24fdec1a87f2b6f45574abe")
+API_KEY  = os.environ.get("ELEVENLABS_API_KEY", "")
 VOICE_ID = os.environ.get("JARVIS_VOICE_ID", "pNInz6obpgDQGcFmaJgB")   # Adam — deep & assertive
 MODEL    = "eleven_multilingual_v2"
 TMPDIR   = os.environ.get("TMPDIR", "/tmp")
@@ -45,6 +45,9 @@ def play(path: str) -> None:
 def speak(text: str) -> None:
     text = clean(text)
     if not text: return
+    if not API_KEY:
+        print("[voice] ELEVENLABS_API_KEY not set — voice disabled (set the env var to enable).", file=sys.stderr)
+        return
     print(f"[Jarvis voice] {text[:80]}{'...' if len(text)>80 else ''}", file=sys.stderr)
     try:
         res = requests.post(

@@ -1341,7 +1341,7 @@ function ModelSettingsTab({ settings, onSave }: { settings: AppSettings; onSave:
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">Custom ElevenLabs API key (optional — server key active)</label>
+            <label className="text-xs text-gray-400 mb-1 block">Custom ElevenLabs API key (optional — voice stays off without one)</label>
             <input type="password" value={local.elevenlabs_api_key || ''}
               onChange={e => setLocal(s => ({ ...s, elevenlabs_api_key: e.target.value }))}
               placeholder="sk_… (leave blank to use server key)"
