@@ -6,8 +6,8 @@ const nextConfig = {
   // ── Extend serverless function timeouts ─────────────────────────────────
   // Vercel Pro: 300s max. Hobby: 60s max. Set as high as your plan allows.
   experimental: {
-    // serverActions timeout (Next 14+)
-    serverActionsBodySizeLimit: '4mb',
+    // Server Actions body size limit (Next 14+)
+    serverActions: { bodySizeLimit: '4mb' },
   },
 
   // Per-route timeout overrides (Vercel reads this from next.config)
