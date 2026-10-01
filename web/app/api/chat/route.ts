@@ -117,6 +117,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Send { messages: [{ role: "user", content: "..." }] } or { message: "..." }' }, { status: 400 });
   }
 
+  // ── Server-side input validation (frontend enforces 20k; this is the hard ceiling) ──
+  const MAX_MSG_CHARS = 50_000;
+  const MAX_HISTORY   = 30;
+  for (const m of messages) {
+    if (typeof m.content !== 'string') {
+      return NextResponse.json({ error: 'Each message content must be a string' }, { status: 400 });
+    }
+    if (m.content.length > MAX_MSG_CHARS) {
+      return NextResponse.json({ error: `Message too long (${m.content.length} chars). Limit is ${MAX_MSG_CHARS}.` }, { status: 400 });
+    }
+  }
+  const trimmed = messages.slice(-MAX_HISTORY).map(m => ({
+    role:    m.role === 'assistant' ? 'assistant' : 'user',
+    content: m.content.slice(0, MAX_MSG_CHARS),
+  }));
+  messages.length = 0;
+  messages.push(...trimmed);
+
   const settings     = (body.settings as Record<string, unknown>) ?? {};
   const rawModelName = (settings.active_model_name as string) || (settings.model as string) || 'llama-3.3-70b-versatile';
   const { modelId, provider, label, cloud } = resolveModel(rawModelName);

@@ -17,6 +17,8 @@ interface Message {
   model?: string;
   provider?: string;
   agent_role?: string;
+  /** Server-sent notice (e.g. keyless-fallback info) shown as a small banner */
+  info?: string;
   tool_calls?: ToolCallRecord[];
   api_call_url?: string;
   api_call_response?: string;
@@ -88,9 +90,9 @@ type Tab = 'chat' | 'connectors' | 'model_settings' | 'integrations';
 /* ─── Simple Markdown renderer ──────────────────────── */
 function renderMarkdown(text: string): string {
   return text
-    // Code blocks
+    // Code blocks — language label + copy button (handled by delegated click in MessageBubble)
     .replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) =>
-      `<pre class="bg-gray-900 border border-gray-700 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono text-green-300 whitespace-pre">${escHtml(code.trim())}</pre>`)
+      `<div class="codeblock"><div class="codeblock-head"><span class="codeblock-lang">${escHtml(lang || 'code')}</span><button class="codeblock-copy" data-copy-code>Copy</button></div><pre class="codeblock-pre">${escHtml(code.trim())}</pre></div>`)
     // Inline code
     .replace(/`([^`]+)`/g, '<code class="bg-gray-800 text-indigo-300 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
     // Bold
@@ -353,8 +355,22 @@ function MessageBubble({ msg, idx, onDelete, onCopy, copied }: {
   const [showTools, setShowTools] = useState(false);
   const hasTools = msg.tool_calls && msg.tool_calls.length > 0;
 
+  // Delegated copy for markdown code blocks (rendered via dangerouslySetInnerHTML)
+  const onBubbleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const btn = (e.target as HTMLElement).closest('[data-copy-code]') as HTMLButtonElement | null;
+    if (!btn) return;
+    const pre = btn.closest('.codeblock')?.querySelector('pre');
+    if (!pre?.textContent) return;
+    navigator.clipboard.writeText(pre.textContent).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied ✓';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+    }).catch(() => { /* clipboard unavailable */ });
+  };
+
   return (
-    <div className={`flex ${msg.is_user ? 'justify-end' : 'justify-start'} mb-4 group`}>
+    <div className={`msg-enter flex ${msg.is_user ? 'justify-end' : 'justify-start'} mb-4 group`} onClick={onBubbleClick}>
       {!msg.is_user && (
         <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center mr-2 flex-shrink-0 mt-1 shadow-lg shadow-indigo-600/20">
           <Bot size={16}/>
@@ -383,11 +399,16 @@ function MessageBubble({ msg, idx, onDelete, onCopy, copied }: {
             ? 'bg-indigo-600 text-white rounded-tr-sm'
             : 'bg-gray-800/60 border border-gray-700/40 text-gray-100 rounded-tl-sm'
         } ${msg.status === 'ERROR' ? 'border-red-500/50 bg-red-900/20' : ''}`}>
+          {msg.info && !msg.is_user && (
+            <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-amber-900/20 border border-amber-700/30 text-[11px] text-amber-300/90 leading-snug">
+              ⓘ {msg.info}
+            </div>
+          )}
           {msg.status === 'ERROR' && <AlertCircle size={14} className="inline mr-1 text-red-400"/>}
           {msg.is_user ? (
             <span className="whitespace-pre-wrap">{msg.text}</span>
           ) : msg.streaming && !msg.text ? (
-            <span className="inline-block w-2 h-4 bg-indigo-400 animate-pulse rounded-sm"/>
+            <span className="stream-caret"/>
           ) : (
             <div
               className="prose-sm prose-invert"
@@ -438,6 +459,8 @@ const STARTERS = [
   { icon: <Globe size={14}/>, text: 'Fetch https://api.github.com/zen and tell me what it says', label: 'Test fetch' },
   { icon: <Zap size={14}/>, text: 'What tools do you have and what can you do?', label: 'Your capabilities' },
 ];
+
+const MAX_INPUT_LEN = 20000;
 
 /* ─── Main Component ─────────────────────────────────── */
 export default function Home() {
@@ -603,6 +626,14 @@ export default function Home() {
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || isThinking) return;
+    if (text.length > MAX_INPUT_LEN) {
+      const errMsg: Message = {
+        text: `Message too long (${text.length.toLocaleString()} chars). Limit is ${MAX_INPUT_LEN.toLocaleString()} characters — shorten it and try again.`,
+        is_user: false, status: 'ERROR',
+      };
+      setMessages(prev => [...prev, errMsg]);
+      return;
+    }
     setInput('');
     setIsThinking(true);
     setThinkingStatus('Thinking…');
@@ -669,6 +700,8 @@ export default function Home() {
         let streamModel = '';
         let streamProvider = '';
         let streamRole = '';
+        let streamInfo = '';
+        let streamError: string | null = null;
 
         // Push a live placeholder immediately -- user sees output right away
         setMessages(prev => [...prev, { text: '', is_user: false, status: 'STREAMING', streaming: true }]);
@@ -698,6 +731,13 @@ export default function Home() {
                 const last = toolCallsAccum[toolCallsAccum.length - 1];
                 if (last) last.result = chunk.result || '';
                 setThinkingStatus(`done -- thinking...`);
+              } else if (chunk.type === 'info' && chunk.content) {
+                // Server notice (e.g. keyless fallback) — surfaced as a banner on the message
+                streamInfo = streamInfo ? `${streamInfo}\n${chunk.content}` : chunk.content;
+              } else if (chunk.type === 'error' && chunk.content) {
+                // Provider/upstream failure — abort the stream and surface the real error
+                streamError = chunk.content;
+                break;
               } else if (chunk.type === 'text' && chunk.text) {
                 finalText += chunk.text;
                 if (!streamingStarted) { streamingStarted = true; setThinkingStatus(''); }
@@ -719,16 +759,20 @@ export default function Home() {
               }
             } catch { /* ignore malformed chunk */ }
           }
+          if (streamError) break; // provider error — stop reading the stream
         }
 
         // Remove the streaming placeholder -- replaced by the final committed message below
         setMessages(prev => prev.filter((m: Message) => !m.streaming));
         setThinkingStatus('Thinking...');
 
+        if (streamError) throw new Error(streamError); // → ERROR bubble with the real provider message
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         resp = { text: finalText, model: streamModel || undefined, tool_calls: toolCallsAccum } as typeof resp;
         (resp as unknown as Record<string, unknown>).provider   = streamProvider || undefined;
         (resp as unknown as Record<string, unknown>).agent_role = streamRole || undefined;
+        (resp as unknown as Record<string, unknown>).info       = streamInfo || undefined;
       } else {
         // ── Standard JSON path ─────────────────────────────────────────
         resp = await chatRes.json();
@@ -754,6 +798,7 @@ export default function Home() {
         model:      resp.model,
         provider:   (resp as Record<string, unknown>).provider as string | undefined,
         agent_role: (resp as Record<string, unknown>).agent_role as string | undefined,
+        info:       (resp as Record<string, unknown>).info as string | undefined,
         tool_calls: resp.tool_calls || [],
       };
       setMessages(prev => [...prev, aiMsg]);
@@ -929,7 +974,7 @@ export default function Home() {
                       : 'Connect GitHub in the Connect tab to give me access to your repos'
                     }
                   </p>
-                  <div className="grid grid-cols-2 gap-2 w-full max-w-md">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md">
                     {STARTERS.map(s => (
                       <button key={s.label} onClick={() => { setInput(s.text); setTimeout(() => inputRef.current?.focus(), 50); }}
                         className="flex items-center gap-2 text-left px-3 py-2.5 bg-gray-800/60 border border-gray-700/40 rounded-xl hover:border-indigo-600/40 hover:bg-gray-800 transition-all text-xs text-gray-400 hover:text-gray-200">
@@ -959,7 +1004,7 @@ export default function Home() {
             {/* Input area */}
             <div className="p-4 border-t border-gray-800/60 bg-gray-950/95">
               {/* ── Inline model picker ── */}
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap min-w-0">
                 <select
                   value={settings.active_model_name}
                   onChange={e => {
@@ -1045,11 +1090,16 @@ export default function Home() {
                   onInput={e => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; }}
                   className="flex-1 bg-transparent text-sm text-gray-100 placeholder-gray-500 outline-none leading-relaxed py-1"
                 />
-                <button onClick={sendMessage} disabled={!input.trim() || isThinking}
+                <button onClick={sendMessage} disabled={!input.trim() || isThinking || input.trim().length > MAX_INPUT_LEN}
                   className="w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all flex-shrink-0 shadow-lg shadow-indigo-600/30">
                   {isThinking ? <Loader2 size={15} className="animate-spin"/> : <Send size={15}/>}
                 </button>
               </div>
+              {input.length > 15000 && (
+                <p className={`text-right text-[10px] mt-1 font-mono ${input.length > MAX_INPUT_LEN ? 'text-red-400' : 'text-gray-500'}`}>
+                  {input.length.toLocaleString()} / {MAX_INPUT_LEN.toLocaleString()} chars
+                </p>
+              )}
               <p className="text-center text-[11px] text-gray-700 mt-2">
                 Enter to send · Shift+Enter for new line · I use tools autonomously to complete tasks
               </p>
