@@ -3,7 +3,7 @@
   <p><strong>Multi-model AI agent with voice (ElevenLabs), hardware monitor, live streaming, GitHub context injection, and cross-platform deployment</strong></p>
 
   <p>
-    <a href="https://api-ai-agent.vercel.app">🌐 Live Demo</a> |
+    🌐 Live Demo (offline — old Vercel deployment paused, needs migration to a new host) |
     <a href="#quick-start">⚡ Quick Start</a> |
     <a href="#android-termux">📱 Android / Termux</a> |
     <a href="#voice">🔊 Voice</a>
@@ -245,7 +245,6 @@ Server key is active — check Vercel env vars or set `ELEVENLABS_API_KEY` local
 <div align="center">
   <p><strong>Built by <a href="https://github.com/jaykk99">@jaykk99</a></strong></p>
   <p>
-    <a href="https://github.com/jaykk99/Agent">GitHub</a> |
-    <a href="https://api-ai-agent.vercel.app">Live Demo</a>
+    <a href="https://github.com/jaykk99/Agent">GitHub</a>
   </p>
 </div>
