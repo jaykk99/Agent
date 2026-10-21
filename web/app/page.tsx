@@ -5,7 +5,7 @@ import {
   Send, Bot, Plug, Settings, Github, Trash2, Plus, Copy, Check,
   ChevronDown, ChevronUp, Loader2, X, AlertCircle, LogOut,
   Globe, FolderOpen, ExternalLink, Zap, Terminal, Search,
-  Database, Cloud, Code2, GitBranch, Eye, Volume2, VolumeX, Activity
+  Database, Cloud, Code2, GitBranch, Eye, Volume2, VolumeX, Activity, Download
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────── */
@@ -840,10 +840,44 @@ export default function Home() {
     setLastLatencyMs(0);
   };
 
-  /* ── ElevenLabs TTS ──────────────────────────────── */
+  /* ── Conversation export (Markdown / JSON download) ─────────────── */
+  const exportChat = (format: 'md' | 'json') => {
+    const done = messages.filter(m => !m.streaming && m.text?.trim());
+    if (!done.length) return;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const body = format === 'json'
+      ? JSON.stringify({ exportedAt: new Date().toISOString(), sessionId, messages: done }, null, 2)
+      : ['# Jarvis chat export', '', ...done.map(m =>
+          '## ' + (m.is_user ? 'You' : 'Jarvis' + (m.model ? ' (' + m.model + ')' : '')) + '\n\n' + m.text + '\n'
+        )].join('\n');
+    const blob = new Blob([body], { type: format === 'json' ? 'application/json' : 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'jarvis-chat-' + stamp + '.' + format;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  /* ── ElevenLabs TTS, with browser speechSynthesis fallback ──────────────
+     Keyless-first: when /api/tts has no ElevenLabs key (503) or fails, the
+     browser's own voices keep read-aloud working instead of going silent. */
+  const speakWithBrowser = (text: string) => {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth) { setIsSpeaking(false); return; }
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.onend = () => setIsSpeaking(false);
+      u.onerror = () => setIsSpeaking(false);
+      synth.speak(u);
+    } catch { setIsSpeaking(false); }
+  };
+
   const speakText = (text: string) => {
     if (!settings.tts_enabled) return;
     if (currentAudioRef.current) { currentAudioRef.current.pause(); currentAudioRef.current = null; }
+    try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
     // Strip markdown symbols for cleaner audio
     const clean = text.replace(/[#*`_~\[\]]/g, '').replace(/\n+/g, ' ').trim().slice(0, 1500);
     if (!clean) return;
@@ -853,7 +887,7 @@ export default function Home() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: clean, voice_id: settings.tts_voice_id || 'pNInz6obpgDQGcFmaJgB' }),
     }).then(res => {
-      if (!res.ok) { setIsSpeaking(false); return; }
+      if (!res.ok) { speakWithBrowser(clean); return; } // no key / provider down → browser voice
       return res.blob();
     }).then(blob => {
       if (!blob) return;
@@ -861,9 +895,9 @@ export default function Home() {
       const audio = new Audio(url);
       currentAudioRef.current = audio;
       audio.onended = () => { URL.revokeObjectURL(url); setIsSpeaking(false); currentAudioRef.current = null; };
-      audio.onerror = () => { setIsSpeaking(false); currentAudioRef.current = null; };
-      audio.play().catch(() => setIsSpeaking(false));
-    }).catch(() => setIsSpeaking(false));
+      audio.onerror = () => { speakWithBrowser(clean); currentAudioRef.current = null; };
+      audio.play().catch(() => speakWithBrowser(clean));
+    }).catch(() => speakWithBrowser(clean));
   };
 
   /* ── Connected integrations badge ── */
@@ -908,9 +942,17 @@ export default function Home() {
             </div>
           )}
           {tab === 'chat' && messages.length > 0 && (
-            <button onClick={clearChat} className="text-xs text-gray-600 hover:text-gray-400 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-800 transition-colors">
-              <Trash2 size={12}/> Clear
-            </button>
+            <>
+              <button onClick={() => exportChat('md')} title="Download conversation as Markdown" className="text-xs text-gray-600 hover:text-gray-400 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-800 transition-colors">
+                <Download size={12}/> MD
+              </button>
+              <button onClick={() => exportChat('json')} title="Download conversation as JSON" className="text-xs text-gray-600 hover:text-gray-400 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-800 transition-colors">
+                <Download size={12}/> JSON
+              </button>
+              <button onClick={clearChat} className="text-xs text-gray-600 hover:text-gray-400 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-800 transition-colors">
+                <Trash2 size={12}/> Clear
+              </button>
+            </>
           )}
           {/* TTS toggle */}
           <button
