@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { appUrl } from '@/lib/appUrl';
 
 export const runtime = 'nodejs';
 export const dynamic  = 'force-dynamic';
@@ -11,8 +12,7 @@ export async function GET() {
     return NextResponse.json({ error: 'Supabase not configured.' }, { status: 500 });
   }
 
-  const baseUrl   = process.env.NEXTAUTH_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const baseUrl   = appUrl();
   const redirectTo = `${baseUrl}/?auth=google`;
 
   // Use Supabase Auth REST API to initiate Google OAuth

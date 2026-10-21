@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { appUrl } from '@/lib/appUrl';
 
 export const runtime = 'nodejs';
 export const dynamic  = 'force-dynamic';
@@ -6,8 +7,7 @@ export const dynamic  = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code');
 
-  const baseUrl = process.env.NEXTAUTH_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const baseUrl = appUrl();
 
   if (!code) return NextResponse.redirect(`${baseUrl}/?error=no_code`);
 

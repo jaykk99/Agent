@@ -23,13 +23,13 @@
 | 🐙 **GitHub Injection** | Attach a repo → full tree injected as context |
 | 🛠️ **Tool Calls** | Persistent tool-call logs in Supabase |
 | 🔒 **Rate Limiting** | 20 req/60s per-IP token bucket |
-| ☁️ **Vercel Deploy** | Zero-config, one-command deployment |
+| ☁️ **Render Deploy** | Blueprint (`render.yaml`) — build, start, health check |
 
 ---
 
 ## 🚀 Quick Start
 
-### Web (Vercel / Local)
+### Web (Render / Local)
 
 ```bash
 # 1. Clone
@@ -55,13 +55,16 @@ npm run dev
 npm run build && npm start
 ```
 
-### One-command deploy to Vercel
+### Deploy to Render
 ```bash
-npm i -g vercel
-cd Agent/web
-vercel --prod
-# Set env vars in Vercel dashboard or via:
-vercel env add ELEVENLABS_API_KEY
+# In Render: New → Blueprint → point at this repo's render.yaml.
+# Build:  cd web && npm install && npm run build
+# Start:  cd web && npm start
+# Health check: /api/health
+# Then set env vars in the Render dashboard (see web/.env.example) —
+# keyless-first: the app runs with no keys at all (chat uses the free
+# keyless fallback; TTS falls back to the browser's own voices).
+# Set APP_URL to your Render URL so OAuth redirects work.
 ```
 
 ---
