@@ -5,42 +5,10 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
+import { isSafeUrl } from '@/lib/ssrf';
 
 export const runtime = 'nodejs';
 export const dynamic  = 'force-dynamic';
-
-// SSRF blocklist — prevent hitting internal services
-const BLOCKED_HOSTS = [
-  'localhost', '127.0.0.1', '0.0.0.0', '::1',
-  '169.254.169.254',   // AWS/GCP metadata
-  '100.100.100.200',   // Alibaba metadata
-  '192.168.', '10.', '172.16.', '172.17.', '172.18.',
-  '172.19.', '172.20.', '172.21.', '172.22.', '172.23.',
-  '172.24.', '172.25.', '172.26.', '172.27.', '172.28.',
-  '172.29.', '172.30.', '172.31.',
-];
-
-const BLOCKED_SCHEMES = ['file:', 'ftp:', 'gopher:', 'data:'];
-
-function isSafeUrl(rawUrl: string): { ok: boolean; reason?: string } {
-  let parsed: URL;
-  try { parsed = new URL(rawUrl); }
-  catch { return { ok: false, reason: 'Invalid URL' }; }
-
-  if (BLOCKED_SCHEMES.some(s => parsed.protocol === s)) {
-    return { ok: false, reason: `Scheme ${parsed.protocol} not allowed` };
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    return { ok: false, reason: 'Only http/https allowed' };
-  }
-  const host = parsed.hostname.toLowerCase();
-  for (const blocked of BLOCKED_HOSTS) {
-    if (host === blocked || host.startsWith(blocked)) {
-      return { ok: false, reason: `Host ${host} is not reachable from this server` };
-    }
-  }
-  return { ok: true };
-}
 
 export async function POST(req: NextRequest) {
   // Rate limit: 30 calls / 60s per IP
